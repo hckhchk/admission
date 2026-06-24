@@ -327,24 +327,42 @@ function updateSummary(byUniv, univs, gradeKey) {
     const q1 = quantile(grades, 0.25);
     const med = median(grades);
     const q3 = quantile(grades, 0.75);
-    if (g < q1)        stable.push(u);
-    else if (g <= med) proper.push(u);
-    else if (g <= q3)  reach.push(u);
+    const n = grades.length;
+    const entry = { u, n };
+    if (g < q1)        stable.push(entry);
+    else if (g <= med) proper.push(entry);
+    else if (g <= q3)  reach.push(entry);
+  }
+
+  const LOW_N = 5;
+
+  function chip(entry, cls) {
+    const lowN = entry.n < LOW_N;
+    const style = lowN ? 'opacity:0.5; border: 1px dashed #aaa;' : '';
+    const nLabel = lowN ? ` (n=${entry.n}⚠)` : `(n=${entry.n})`;
+    return `<span class="chip ${cls}" style="${style}" title="${lowN ? '합격 사례 수가 적어 참고용으로만 활용하세요' : ''}">${entry.u} ${nLabel}</span>`;
   }
 
   function group(title, color, cls, items, hint) {
     if (!items.length) return '';
     return `<div class="summary-group">
       <div class="summary-title" style="color:${color}">${title} (${items.length}개)</div>
-      <div class="summary-chips">${items.map(u => `<span class="chip ${cls}">${u}</span>`).join('')}</div>
+      <div class="summary-chips">${items.map(e => chip(e, cls)).join('')}</div>
       <div class="hint">${hint}</div>
     </div>`;
   }
 
+  const disclaimer = `<div style="font-size:11px;color:#aaa;margin-top:10px;line-height:1.6;">
+    ※ 위 분류는 과거 합격자 등급 분포 내 위치를 나타낸 참고 자료입니다. 실제 합격 여부와 다를 수 있으며,
+    전형별 특성·수능최저·면접 등 다양한 요소가 결과에 영향을 줍니다.
+    ⚠ 표시는 합격 사례 ${LOW_N}건 미만으로 통계적 신뢰도가 낮습니다.
+  </div>`;
+
   el.innerHTML =
-    group('🟢 안정권', '#1e8449', 'chip-stable', stable, '내 등급이 합격자 하위 25%보다 우수') +
-    group('🔵 적정권', '#1a5276', 'chip-proper', proper, '내 등급이 합격자 중앙값 이내') +
-    group('🟠 소신권', '#784212', 'chip-reach',  reach,  '내 등급이 합격자 중앙~상위 25% 구간');
+    group('📊 합격자 상위 25% 이내', '#1e8449', 'chip-stable', stable, `입력한 등급(${g.toFixed(2)})이 최종합격자 하위 25% 등급보다 우수한 구간`) +
+    group('📊 합격자 중앙값 이내',   '#1a5276', 'chip-proper', proper, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값 이내 구간`) +
+    group('📊 합격자 중앙~상위 25% 구간', '#784212', 'chip-reach', reach, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값~상위 25% 등급 사이 구간`) +
+    disclaimer;
 }
 
 // ── 트렌드 ─────────────────────────────────────────────
