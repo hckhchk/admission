@@ -95,7 +95,7 @@ def prepare_data(file_path):
         lambda r: classify_admission(r.get('전형명칭', ''), r.get('전형유형', '')), axis=1
     )
 
-    cols = ['대입연도', '대학교명', '국영수과 등평', '전교과 등평', '상태구분', 'is_medical', 'admission_type']
+    cols = ['대입연도', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '상태구분', 'is_medical', 'admission_type']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -153,11 +153,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     position: relative;
   }
   #modal-title { font-size: 17px; font-weight: 700; color: #1a2a4a; margin-bottom: 4px; }
-  #modal-sub   { font-size: 12px; color: #aaa; margin-bottom: 14px; }
+  #modal-sub   { font-size: 12px; color: #aaa; margin-bottom: 10px; }
   #modal-close {
     position: absolute; top: 16px; right: 18px;
     background: none; border: none; font-size: 20px; cursor: pointer; color: #888;
   }
+  .modal-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .modal-tab {
+    padding: 5px 16px; border: 2px solid #d0d7e3; border-radius: 20px;
+    background: white; cursor: pointer; font-size: 13px; font-weight: 600; color: #555;
+  }
+  .modal-tab.on { background: #16a085; border-color: #16a085; color: white; }
   #modal-chart { width: 100%; }
 
   #grade-summary { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 12px; }
@@ -217,6 +223,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button id="modal-close" title="닫기">✕</button>
     <div id="modal-title"></div>
     <div id="modal-sub"></div>
+    <div class="modal-tabs">
+      <button class="modal-tab on" onclick="switchModalTab('year', this)">연도별</button>
+      <button class="modal-tab"    onclick="switchModalTab('dept', this)">학과별</button>
+    </div>
     <div id="modal-chart"></div>
   </div>
 </div>
@@ -487,19 +497,45 @@ function updateSummary(byUniv, univs, gradeKey) {
 }
 
 // ── 드릴다운 모달 ───────────────────────────────────────
+let drillUniv = null;
+let drillTab = 'year';
+
 function openDrilldown(univ) {
-  const gradeKey = state.grade;
-  const allYears = [...YEARS].sort();
+  drillUniv = univ;
+  drillTab = 'year';
+  // 탭 버튼 초기화
+  document.querySelectorAll('.modal-tab').forEach((b, i) => b.classList.toggle('on', i === 0));
+  const gradeLabel = state.grade === '국영수과 등평' ? '국영수과' : '전교과';
+  const typeLabel  = state.filter === '전체' ? '전체 전형' : state.filter;
+  document.getElementById('modal-title').textContent = univ;
+  document.getElementById('modal-sub').textContent   = `${typeLabel} · ${gradeLabel} 기준`;
+  document.getElementById('modal-overlay').classList.add('open');
+  renderModalYear();
+}
 
-  // 해당 대학 전체 연도 데이터 (연도 필터 무시, 전형 필터는 유지)
-  const rows = RAW.filter(r =>
-    r['대학교명'] === univ &&
-    (state.filter === '전체' || r['admission_type'] === state.filter) &&
-    r[gradeKey] != null
-  );
+function switchModalTab(tab, btn) {
+  drillTab = tab;
+  document.querySelectorAll('.modal-tab').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  tab === 'year' ? renderModalYear() : renderModalDept();
+}
 
-  if (!rows.length) return;
+function modalShapes() {
+  const shapes = [], annotations = [];
+  if (state.myGrade) {
+    shapes.push({ type: 'line', x0: 0, x1: 1, xref: 'paper',
+      y0: state.myGrade, y1: state.myGrade, yref: 'y',
+      line: { color: '#e74c3c', width: 2, dash: 'dash' } });
+    annotations.push({ x: 1.01, xref: 'paper', xanchor: 'left',
+      y: state.myGrade, yref: 'y',
+      text: `내 등급 ${state.myGrade.toFixed(2)}`,
+      showarrow: false, font: { color: '#e74c3c', size: 11, weight: 700 },
+      bgcolor: 'rgba(255,255,255,0.85)' });
+  }
+  return { shapes, annotations };
+}
 
+function buildBoxTraces(rows, xKey, order) {
   const traces = [];
   for (const [status, color] of [
     ['1차탈락', COLORS['1차탈락']],
@@ -507,13 +543,8 @@ function openDrilldown(univ) {
     ['최종합격', COLORS['최종합격']],
   ]) {
     const sx = [], sy = [];
-    for (const y of allYears) {
-      for (const r of rows) {
-        if (r['대입연도'] === y && r['상태구분'] === status) {
-          sx.push(String(y) + '년');
-          sy.push(r[gradeKey]);
-        }
-      }
+    for (const r of rows) {
+      if (r['상태구분'] === status) { sx.push(r[xKey]); sy.push(r[state.grade]); }
     }
     if (!sx.length) continue;
     const isRej = status === '1차탈락';
@@ -523,46 +554,78 @@ function openDrilldown(univ) {
       line: { color },
       fillcolor: isRej ? 'rgba(204,204,204,0.1)' : undefined,
       boxpoints: 'all', jitter: 0.35, pointpos: 0,
-      hovertemplate: '%{x} %{y:.2f}<extra>' + status + '</extra>',
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<extra>' + status + '</extra>',
     });
   }
+  return traces;
+}
 
-  // 내 등급 수평선
-  const shapes = [], annotations = [];
-  if (state.myGrade) {
-    shapes.push({
-      type: 'line', x0: 0, x1: 1, xref: 'paper',
-      y0: state.myGrade, y1: state.myGrade, yref: 'y',
-      line: { color: '#e74c3c', width: 2, dash: 'dash' },
-    });
-    annotations.push({
-      x: 1.01, xref: 'paper', xanchor: 'left',
-      y: state.myGrade, yref: 'y',
-      text: `내 등급 ${state.myGrade.toFixed(2)}`,
-      showarrow: false, font: { color: '#e74c3c', size: 11, weight: 700 },
-      bgcolor: 'rgba(255,255,255,0.85)',
-    });
-  }
+// 연도별 뷰
+function renderModalYear() {
+  const gradeKey = state.grade;
+  const allYears = [...YEARS].sort();
+  const rows = RAW.filter(r =>
+    r['대학교명'] === drillUniv &&
+    (state.filter === '전체' || r['admission_type'] === state.filter) &&
+    r[gradeKey] != null
+  ).map(r => ({ ...r, _yearLabel: String(r['대입연도']) + '년' }));
 
-  const gradeLabel = gradeKey === '국영수과 등평' ? '국영수과' : '전교과';
-  const typeLabel = state.filter === '전체' ? '전체 전형' : state.filter;
-
-  document.getElementById('modal-title').textContent = univ;
-  document.getElementById('modal-sub').textContent = `${typeLabel} · ${gradeLabel} 기준 · 연도별 지원 결과`;
-  document.getElementById('modal-overlay').classList.add('open');
+  if (!rows.length) return;
+  const traces = buildBoxTraces(rows, '_yearLabel', allYears.map(y => y + '년'));
+  const { shapes, annotations } = modalShapes();
 
   Plotly.react('modal-chart', traces, {
-    xaxis: {
-      title: '입시 연도',
-      categoryorder: 'array',
-      categoryarray: allYears.map(y => String(y) + '년'),
-    },
+    xaxis: { title: '입시 연도', categoryorder: 'array',
+             categoryarray: allYears.map(y => y + '년') },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
     boxmode: 'group',
-    legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
-    height: 420, margin: { b: 60, t: 20, r: 90 },
-    plot_bgcolor: '#fafbff',
-    shapes, annotations,
+    legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
+    height: 420, margin: { b: 60, t: 16, r: 90 },
+    plot_bgcolor: '#fafbff', shapes, annotations,
+  }, { responsive: true });
+}
+
+// 학과별 뷰
+function renderModalDept() {
+  const gradeKey = state.grade;
+  const rows = RAW.filter(r =>
+    r['대학교명'] === drillUniv &&
+    state.years.has(r['대입연도']) &&
+    (state.filter === '전체' || r['admission_type'] === state.filter) &&
+    r[gradeKey] != null &&
+    r['모집단위']
+  );
+
+  if (!rows.length) {
+    Plotly.react('modal-chart', [], { height: 200 }, { responsive: true });
+    return;
+  }
+
+  // 학과 정렬: 최종합격 중앙값 기준
+  const byDept = {};
+  for (const r of rows) (byDept[r['모집단위']] ??= []).push(r);
+  const deptOrder = Object.entries(byDept)
+    .map(([d, rs]) => {
+      const g = rs.filter(r => r['상태구분'] === '최종합격').map(r => r[gradeKey]);
+      const g2 = rs.filter(r => r['상태구분'] === '1차합격_최종탈락').map(r => r[gradeKey]);
+      return { d, med: g.length ? median(g) : (g2.length ? median(g2) : 99) };
+    })
+    .sort((a, b) => a.med - b.med)
+    .map(x => x.d);
+
+  const traces = buildBoxTraces(rows, '모집단위', deptOrder);
+  const { shapes, annotations } = modalShapes();
+  const yearLabel = [...state.years].sort().join(', ');
+
+  Plotly.react('modal-chart', traces, {
+    title: { text: `${yearLabel}년 선택`, font: { size: 12, color: '#aaa' } },
+    xaxis: { title: '모집단위(학과)', categoryorder: 'array',
+             categoryarray: deptOrder, tickangle: -35 },
+    yaxis: { title: gradeKey, range: [9.2, 0.8] },
+    boxmode: 'group',
+    legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
+    height: 440, margin: { b: 130, t: 30, r: 90 },
+    plot_bgcolor: '#fafbff', shapes, annotations,
   }, { responsive: true });
 }
 
