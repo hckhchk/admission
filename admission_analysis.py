@@ -48,7 +48,8 @@ def prepare_data(file_path):
         '1차결과':       ['1차결과', '1차', '1차 합격', '1차_결과'],
         '결과':          ['최종결과', '최종 합격', '최종결과', '결과'],
         '대학교명':      ['대학교명', '대학', '학교'],
-        '국영수과 등평': ['국영수과 등평', '국영수', '등평', '국영수과등평'],
+        '국영수과 등평': ['국영수과 등평', '국영수과등평'],
+        '전교과 등평':   ['전교과 등평', '전교과등평'],
         '모집단위':      ['모집 단위(학과)', '모집단위', '학과', '모집'],
         '전형명칭':      ['전형명칭', '전형명'],
         '전형유형':      ['전형\n유형', '전형유형', '유형'],
@@ -69,6 +70,10 @@ def prepare_data(file_path):
 
     df = df.rename(columns={v: k for k, v in col_map.items()})
     df['국영수과 등평'] = pd.to_numeric(df['국영수과 등평'], errors='coerce')
+    if '전교과 등평' in df.columns:
+        df['전교과 등평'] = pd.to_numeric(df['전교과 등평'], errors='coerce')
+    else:
+        df['전교과 등평'] = float('nan')
     df = df.dropna(subset=['국영수과 등평', '대학교명', '대입연도'])
     df['대입연도'] = df['대입연도'].astype(int)
 
@@ -90,7 +95,7 @@ def prepare_data(file_path):
         lambda r: classify_admission(r.get('전형명칭', ''), r.get('전형유형', '')), axis=1
     )
 
-    cols = ['대입연도', '대학교명', '국영수과 등평', '상태구분', 'is_medical', 'admission_type']
+    cols = ['대입연도', '대학교명', '국영수과 등평', '전교과 등평', '상태구분', 'is_medical', 'admission_type']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -146,6 +151,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="ctrl-label">계열</div>
       <div class="btn-row" id="cat-row"></div>
     </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">등급 기준</div>
+      <div class="btn-row" id="grade-row"></div>
+    </div>
     <div class="ctrl-group" style="margin-left:auto; align-self:flex-end;">
       <div style="font-size:12px; color:#999; line-height:1.6;">
         x축: <b>대학명(지원학생수)</b><br>
@@ -174,6 +183,7 @@ const state = {
   years: new Set([2026].filter(y => YEARS.includes(y)).concat(YEARS.includes(2026) ? [] : [YEARS[YEARS.length - 1]])),
   filter: '학생부종합',
   cat: '일반계열',
+  grade: '국영수과 등평',
 };
 
 // ── UI setup ───────────────────────────────────────────
@@ -223,6 +233,19 @@ CATS.forEach(c => {
   catRow.appendChild(b);
 });
 
+// Grade type buttons
+const GRADES = ['국영수과 등평', '전교과 등평'];
+const gradeRow = document.getElementById('grade-row');
+GRADES.forEach(g => {
+  const b = makeBtn(g, 'filter-btn', g === state.grade, () => {
+    state.grade = g;
+    gradeRow.querySelectorAll('.filter-btn').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    render();
+  });
+  gradeRow.appendChild(b);
+});
+
 // ── helpers ────────────────────────────────────────────
 function median(arr) {
   if (!arr.length) return null;
@@ -231,12 +254,11 @@ function median(arr) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-function getOrder(byUniv) {
+function getOrder(byUniv, gradeKey) {
   const sortKey = {};
   for (const [u, rows] of Object.entries(byUniv)) {
-    const finals = rows.filter(r => r.상태구분 === '최종합격').map(r => r['국영수과 등평']);
-    const firsts = rows.filter(r => r.상태구분 === '1차합격_최종탈락').map(r => r['국영수과 등평']);
-    // 최종합격 중앙값 우선, 없으면 1차합격 중앙값 — 통합 정렬
+    const finals = rows.filter(r => r.상태구분 === '최종합격').map(r => r[gradeKey]).filter(v => v != null);
+    const firsts = rows.filter(r => r.상태구분 === '1차합격_최종탈락').map(r => r[gradeKey]).filter(v => v != null);
     if (finals.length) sortKey[u] = median(finals);
     else if (firsts.length) sortKey[u] = median(firsts);
   }
@@ -246,11 +268,13 @@ function getOrder(byUniv) {
 // ── render ─────────────────────────────────────────────
 function render() {
   const isMedical = state.cat === '메디컬계열';
+  const gradeKey = state.grade;
 
   let rows = RAW.filter(r =>
     state.years.has(r['대입연도']) &&
     r['is_medical'] === isMedical &&
-    (state.filter === '전체' || r['admission_type'] === state.filter)
+    (state.filter === '전체' || r['admission_type'] === state.filter) &&
+    r[gradeKey] != null
   );
 
   // 대학별 그룹화
@@ -265,7 +289,7 @@ function render() {
     if (!hasPassed) delete byUniv[u];
   }
 
-  const order = getOrder(byUniv);
+  const order = getOrder(byUniv, gradeKey);
   const univs = order.filter(u => byUniv[u]);
 
   if (!univs.length) {
@@ -288,7 +312,7 @@ function render() {
   const rejX = [], rejY = [];
   for (const u of univs) {
     for (const r of byUniv[u]) {
-      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r['국영수과 등평']); }
+      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); }
     }
   }
   if (rejX.length) {
@@ -310,7 +334,7 @@ function render() {
     const sx = [], sy = [];
     for (const u of univs) {
       for (const r of byUniv[u]) {
-        if (r['상태구분'] === status) { sx.push(u); sy.push(r['국영수과 등평']); }
+        if (r['상태구분'] === status) { sx.push(u); sy.push(r[gradeKey]); }
       }
     }
     if (!sx.length) continue;
@@ -327,9 +351,10 @@ function render() {
   const yearLabel = [...state.years].sort().join(', ');
   const catLabel = state.cat;
   const typeLabel = state.filter === '전체' ? '' : ` · ${state.filter}`;
+  const gradeLabel = gradeKey === '국영수과 등평' ? '국영수과' : '전교과';
 
   const layout = {
-    title: { text: `${yearLabel}년 ${catLabel}${typeLabel}`, font: { size: 16 } },
+    title: { text: `${yearLabel}년 ${catLabel}${typeLabel} · ${gradeLabel} 기준`, font: { size: 16 } },
     xaxis: {
       title: '대학교',
       categoryorder: 'array',
@@ -338,7 +363,7 @@ function render() {
       tickvals,
       ticktext,
     },
-    yaxis: { title: '국영수과 등급평균', range: [9.2, 0.8], fixedrange: false },
+    yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: false },
     boxmode: 'group',
     legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
     height: 620,
