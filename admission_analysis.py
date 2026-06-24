@@ -140,6 +140,26 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   #chart { width: 100%; }
   .empty-msg { text-align: center; padding: 60px; color: #aaa; font-size: 15px; }
 
+  /* 드릴다운 모달 */
+  #modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 1000;
+    align-items: center; justify-content: center;
+  }
+  #modal-overlay.open { display: flex; }
+  #modal-box {
+    background: white; border-radius: 14px; padding: 24px;
+    width: min(820px, 95vw); box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    position: relative;
+  }
+  #modal-title { font-size: 17px; font-weight: 700; color: #1a2a4a; margin-bottom: 4px; }
+  #modal-sub   { font-size: 12px; color: #aaa; margin-bottom: 14px; }
+  #modal-close {
+    position: absolute; top: 16px; right: 18px;
+    background: none; border: none; font-size: 20px; cursor: pointer; color: #888;
+  }
+  #modal-chart { width: 100%; }
+
   #grade-summary { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 12px; }
   .summary-group { background: white; border-radius: 10px; padding: 12px 16px;
                    box-shadow: 0 1px 4px rgba(0,0,0,0.08); flex: 1; min-width: 200px; }
@@ -157,10 +177,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <h2>대학교별 내신 등급 입시 결과 분석</h2>
 
   <div class="controls">
-    <div class="ctrl-group">
-      <div class="ctrl-label">뷰 모드</div>
-      <div class="btn-row" id="view-row"></div>
-    </div>
     <div class="ctrl-group">
       <div class="ctrl-label">입시 연도</div>
       <div class="btn-row" id="year-row"></div>
@@ -183,8 +199,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </div>
     <div class="ctrl-group" style="margin-left:auto; align-self:flex-end;">
       <div style="font-size:11px; color:#bbb; line-height:1.7; text-align:right;">
-        분포도: x축 <b>대학명(지원학생수)</b><br>
-        트렌드: 연도별 최종합격 중앙값
+        x축: <b>대학명(지원학생수)</b><br>
+        대학 클릭 → 연도별 상세 보기
       </div>
     </div>
   </div>
@@ -193,6 +209,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div id="chart"></div>
   </div>
   <div id="grade-summary"></div>
+</div>
+
+<!-- 드릴다운 모달 -->
+<div id="modal-overlay">
+  <div id="modal-box">
+    <button id="modal-close" title="닫기">✕</button>
+    <div id="modal-title"></div>
+    <div id="modal-sub"></div>
+    <div id="modal-chart"></div>
+  </div>
 </div>
 
 <script>
@@ -211,7 +237,6 @@ const state = {
   filter: '학생부종합',
   cat: '일반계열',
   grade: '국영수과 등평',
-  viewMode: '분포도',
   myGrade: null,
 };
 
@@ -223,20 +248,6 @@ function makeBtn(text, cls, active, onClick) {
   b.addEventListener('click', onClick);
   return b;
 }
-
-// View mode
-const VIEWS = ['분포도', '트렌드'];
-const viewRow = document.getElementById('view-row');
-VIEWS.forEach(v => {
-  const b = makeBtn(v, 'view-btn', v === state.viewMode, () => {
-    state.viewMode = v;
-    viewRow.querySelectorAll('.view-btn').forEach(x => x.classList.remove('on'));
-    b.classList.add('on');
-    document.getElementById('mygrade-group').style.display = v === '분포도' ? '' : 'none';
-    render();
-  });
-  viewRow.appendChild(b);
-});
 
 // Year buttons (multi-select)
 const yearRow = document.getElementById('year-row');
@@ -403,7 +414,8 @@ function renderBox() {
   Plotly.react('chart', traces, {
     title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: 16 } },
     xaxis: {
-      title: '대학교', categoryorder: 'array', categoryarray: univs,
+      title: '대학교 (클릭 시 연도별 상세)',
+      categoryorder: 'array', categoryarray: univs,
       tickangle: -38, tickvals: univs, ticktext: univs.map(u => `${u}(${nCount[u]})`),
     },
     yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: false },
@@ -413,6 +425,12 @@ function renderBox() {
     plot_bgcolor: '#fafbff',
     shapes, annotations,
   }, { responsive: true });
+
+  // 대학 클릭 → 연도별 드릴다운
+  document.getElementById('chart').on('plotly_click', data => {
+    const univ = data.points[0].x;
+    openDrilldown(univ);
+  });
 
   // 합격권 요약
   updateSummary(byUniv, univs, gradeKey);
@@ -468,46 +486,44 @@ function updateSummary(byUniv, univs, gradeKey) {
     disclaimer;
 }
 
-// ── 트렌드 ─────────────────────────────────────────────
-function renderTrend() {
+// ── 드릴다운 모달 ───────────────────────────────────────
+function openDrilldown(univ) {
   const gradeKey = state.grade;
-  const isMedical = state.cat === '메디컬계열';
   const allYears = [...YEARS].sort();
 
+  // 해당 대학 전체 연도 데이터 (연도 필터 무시, 전형 필터는 유지)
   const rows = RAW.filter(r =>
-    r['is_medical'] === isMedical &&
+    r['대학교명'] === univ &&
     (state.filter === '전체' || r['admission_type'] === state.filter) &&
     r[gradeKey] != null
   );
 
-  // 대학·연도별 그룹화
-  const byUnivYear = {};
-  for (const r of rows) {
-    (byUnivYear[r['대학교명']] ??= {})[r['대입연도']] ??= [];
-    byUnivYear[r['대학교명']][r['대입연도']].push(r);
-  }
+  if (!rows.length) return;
 
   const traces = [];
-  for (const [u, yearMap] of Object.entries(byUnivYear)) {
-    const xs = [], ys = [], texts = [];
+  for (const [status, color] of [
+    ['1차탈락', COLORS['1차탈락']],
+    ['1차합격_최종탈락', COLORS['1차합격_최종탈락']],
+    ['최종합격', COLORS['최종합격']],
+  ]) {
+    const sx = [], sy = [];
     for (const y of allYears) {
-      if (!yearMap[y]) continue;
-      const finalGrades = yearMap[y].filter(r => r['상태구분'] === '최종합격').map(r => r[gradeKey]).filter(v => v != null);
-      const firstGrades = yearMap[y].filter(r => r['상태구분'] === '1차합격_최종탈락').map(r => r[gradeKey]).filter(v => v != null);
-      const med = finalGrades.length ? median(finalGrades) : (firstGrades.length ? median(firstGrades) : null);
-      if (med == null) continue;
-      const basis = finalGrades.length ? '최종합격 중앙값' : '1차합격 중앙값';
-      xs.push(y); ys.push(parseFloat(med.toFixed(3)));
-      texts.push(`<b>${u}</b><br>${y}년: ${med.toFixed(2)}<br>(${basis})`);
+      for (const r of rows) {
+        if (r['대입연도'] === y && r['상태구분'] === status) {
+          sx.push(String(y) + '년');
+          sy.push(r[gradeKey]);
+        }
+      }
     }
-    if (!xs.length) continue;
+    if (!sx.length) continue;
+    const isRej = status === '1차탈락';
     traces.push({
-      type: 'scatter',
-      mode: xs.length > 1 ? 'lines+markers' : 'markers',
-      x: xs, y: ys, name: u,
-      text: texts, hovertemplate: '%{text}<extra></extra>',
-      line: { width: 1.8 }, marker: { size: 7 },
-      showlegend: false,
+      type: 'box', x: sx, y: sy, name: status,
+      marker: { color, opacity: isRej ? 0.4 : 1, size: 5 },
+      line: { color },
+      fillcolor: isRej ? 'rgba(204,204,204,0.1)' : undefined,
+      boxpoints: 'all', jitter: 0.35, pointpos: 0,
+      hovertemplate: '%{x} %{y:.2f}<extra>' + status + '</extra>',
     });
   }
 
@@ -523,37 +539,44 @@ function renderTrend() {
       x: 1.01, xref: 'paper', xanchor: 'left',
       y: state.myGrade, yref: 'y',
       text: `내 등급 ${state.myGrade.toFixed(2)}`,
-      showarrow: false, font: { color: '#e74c3c', size: 12, weight: 700 },
+      showarrow: false, font: { color: '#e74c3c', size: 11, weight: 700 },
       bgcolor: 'rgba(255,255,255,0.85)',
     });
   }
 
-  if (!traces.length) {
-    document.getElementById('chart').innerHTML = '<div class="empty-msg">해당 조건의 데이터가 없습니다.</div>';
-    document.getElementById('grade-summary').innerHTML = '';
-    return;
-  }
-
-  const typeLabel = state.filter === '전체' ? '' : ` · ${state.filter}`;
   const gradeLabel = gradeKey === '국영수과 등평' ? '국영수과' : '전교과';
+  const typeLabel = state.filter === '전체' ? '전체 전형' : state.filter;
 
-  Plotly.react('chart', traces, {
-    title: { text: `연도별 합격선 트렌드 · ${state.cat}${typeLabel} · ${gradeLabel}`, font: { size: 16 } },
-    xaxis: { title: '입시 연도', tickmode: 'array', tickvals: allYears, dtick: 1 },
+  document.getElementById('modal-title').textContent = univ;
+  document.getElementById('modal-sub').textContent = `${typeLabel} · ${gradeLabel} 기준 · 연도별 지원 결과`;
+  document.getElementById('modal-overlay').classList.add('open');
+
+  Plotly.react('modal-chart', traces, {
+    xaxis: {
+      title: '입시 연도',
+      categoryorder: 'array',
+      categoryarray: allYears.map(y => String(y) + '년'),
+    },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
-    height: 620, margin: { b: 80, t: 60, r: 80 },
+    boxmode: 'group',
+    legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
+    height: 420, margin: { b: 60, t: 20, r: 90 },
     plot_bgcolor: '#fafbff',
-    hovermode: 'closest',
     shapes, annotations,
   }, { responsive: true });
-
-  document.getElementById('grade-summary').innerHTML = '';
 }
+
+// 모달 닫기
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.remove('open');
+});
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay'))
+    document.getElementById('modal-overlay').classList.remove('open');
+});
 
 // ── dispatcher ─────────────────────────────────────────
-function render() {
-  state.viewMode === '트렌드' ? renderTrend() : renderBox();
-}
+function render() { renderBox(); }
 
 render();
 </script>
