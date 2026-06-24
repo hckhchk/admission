@@ -54,6 +54,7 @@ def prepare_data(file_path):
         '모집단위':      ['모집 단위(학과)', '모집단위', '학과', '모집'],
         '전형명칭':      ['전형명칭', '전형명'],
         '전형유형':      ['전형\n유형', '전형유형', '유형'],
+        '최초합격':      ['최초합격'],
     }
 
     col_map = {}
@@ -96,7 +97,14 @@ def prepare_data(file_path):
         lambda r: classify_admission(r.get('전형명칭', ''), r.get('전형유형', '')), axis=1
     )
 
-    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '상태구분', 'is_medical', 'admission_type']
+    # 추가합격: 최종합격이지만 최초합격이 아닌 경우
+    if '최초합격' in df.columns:
+        df['is_additional'] = (df['상태구분'] == '최종합격') & \
+                              (df['최초합격'].astype(str).str.strip() != '합격')
+    else:
+        df['is_additional'] = False
+
+    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '상태구분', 'is_additional', 'is_medical', 'admission_type']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -177,6 +185,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .chip-proper { background: #d6eaf8; color: #1a5276; }
   .chip-reach  { background: #fdebd0; color: #784212; }
   .hint { font-size: 11px; color: #aaa; margin-top: 4px; }
+
+  /* 토글 스위치 */
+  .toggle-group { display: flex; flex-direction: column; gap: 6px; }
+  .toggle-item { display: flex; align-items: center; gap: 8px; }
+  .toggle-label { font-size: 13px; font-weight: 600; color: #555; cursor: pointer; user-select: none; }
+  .toggle-switch { position: relative; display: inline-block; width: 38px; height: 20px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: #ccc; border-radius: 20px; transition: .2s;
+  }
+  .toggle-slider:before {
+    content: ''; position: absolute;
+    width: 14px; height: 14px; left: 3px; bottom: 3px;
+    background: white; border-radius: 50%; transition: .2s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background: #e67e22; }
+  .toggle-switch input:checked + .toggle-slider:before { transform: translateX(18px); }
+  .toggle-switch.blue input:checked + .toggle-slider { background: #2d7dd2; }
+
+  /* 모바일 반응형 */
+  @media (max-width: 680px) {
+    .page { padding: 10px 8px; }
+    h2 { font-size: 15px; margin-bottom: 12px; }
+    .controls {
+      gap: 10px; padding: 12px 10px;
+      flex-direction: column; align-items: stretch;
+    }
+    .ctrl-group { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .ctrl-label { min-width: 70px; font-size: 11px; }
+    .btn-row { flex-wrap: wrap; gap: 4px; }
+    .year-btn, .filter-btn, .cat-btn, .view-btn {
+      padding: 5px 10px; font-size: 12px;
+    }
+    .grade-input { width: 90px; font-size: 12px; }
+    .chart-wrap { padding: 8px; }
+    #modal-box { padding: 14px 12px; width: 98vw; max-height: 90vh; overflow-y: auto; }
+    #modal-title { font-size: 15px; }
+    #modal-chart { min-height: 300px; }
+    .ctrl-group[style*="margin-left:auto"] { display: none; }
+    .toggle-group { flex-direction: row; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .toggle-item { gap: 6px; }
+    .toggle-label { font-size: 12px; }
+    #grade-summary { gap: 8px; }
+    .summary-group { min-width: 100%; padding: 10px 12px; }
+  }
 </style>
 </head>
 <body>
@@ -207,6 +261,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="ctrl-group" id="mygrade-group">
       <div class="ctrl-label">내 등급</div>
       <input type="number" id="my-grade" class="grade-input" min="1" max="9" step="0.01" placeholder="예: 2.30">
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">표시 옵션</div>
+      <div class="toggle-group">
+        <div class="toggle-item">
+          <label class="toggle-switch blue">
+            <input type="checkbox" id="toggle-nopass">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label" onclick="document.getElementById('toggle-nopass').click()">합격 없는 대학 표시</span>
+        </div>
+        <div class="toggle-item">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-additional">
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="toggle-label" onclick="document.getElementById('toggle-additional').click()">추가합격 구분 표시</span>
+        </div>
+      </div>
     </div>
     <div class="ctrl-group" style="margin-left:auto; align-self:flex-end;">
       <div style="font-size:11px; color:#bbb; line-height:1.7; text-align:right;">
@@ -254,7 +327,12 @@ const state = {
   cat: '일반계열',
   grade: '국영수과 등평',
   myGrade: null,
+  showNoPass: false,
+  showAdditional: false,
 };
+
+const ADD_COLOR    = '#e67e22'; // 추가합격 (주황)
+const FIRST_COLOR  = '#0c4da2'; // 최초합격 (기존 최종합격 색)
 
 // ── UI setup ───────────────────────────────────────────
 function makeBtn(text, cls, active, onClick) {
@@ -335,6 +413,16 @@ document.getElementById('my-grade').addEventListener('input', e => {
   render();
 });
 
+// 표시 옵션 토글
+document.getElementById('toggle-nopass').addEventListener('change', e => {
+  state.showNoPass = e.target.checked;
+  render();
+});
+document.getElementById('toggle-additional').addEventListener('change', e => {
+  state.showAdditional = e.target.checked;
+  render();
+});
+
 // ── helpers ────────────────────────────────────────────
 function median(arr) {
   if (!arr.length) return null;
@@ -377,10 +465,13 @@ function renderBox() {
   const byUniv = {};
   for (const r of rows) (byUniv[r['대학교명']] ??= []).push(r);
   for (const u of Object.keys(byUniv)) {
-    if (!byUniv[u].some(r => r['상태구분'] !== '1차탈락')) delete byUniv[u];
+    if (!state.showNoPass && !byUniv[u].some(r => r['상태구분'] !== '1차탈락')) delete byUniv[u];
   }
 
-  const univs = getOrder(byUniv, gradeKey).filter(u => byUniv[u]);
+  const orderedUnivs = getOrder(byUniv, gradeKey).filter(u => byUniv[u]);
+  // 합격 없는 대학(정렬키 없음)은 뒤에 추가
+  const noPassUnivs = Object.keys(byUniv).filter(u => !orderedUnivs.includes(u));
+  const univs = [...orderedUnivs, ...noPassUnivs];
   if (!univs.length) {
     document.getElementById('chart').innerHTML = '<div class="empty-msg">해당 조건의 데이터가 없습니다.</div>';
     document.getElementById('grade-summary').innerHTML = '';
@@ -393,29 +484,71 @@ function renderBox() {
   const traces = [];
 
   // 1차탈락
-  const rejX = [], rejY = [];
+  const rejX = [], rejY = [], rejD = [];
   for (const u of univs)
     for (const r of byUniv[u])
-      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); }
+      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); rejD.push(r['모집단위'] || ''); }
   if (rejX.length) traces.push({
     type: 'box', x: rejX, y: rejY, name: '1차탈락 (참고)',
+    customdata: rejD,
     marker: { color: COLORS['1차탈락'], opacity: 0.45, size: 4 },
     line: { color: COLORS['1차탈락'] }, fillcolor: 'rgba(204,204,204,0.15)',
     boxpoints: 'all', jitter: 0.4, pointpos: 0,
-    hovertemplate: '%{x}<br>등평: %{y:.2f}<extra>1차탈락</extra>',
+    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
   });
 
-  for (const [status, color] of [['최종합격', COLORS['최종합격']], ['1차합격_최종탈락', COLORS['1차합격_최종탈락']]]) {
-    const sx = [], sy = [];
+  // 1차합격_최종탈락
+  {
+    const sx = [], sy = [], sd = [];
     for (const u of univs)
       for (const r of byUniv[u])
-        if (r['상태구분'] === status) { sx.push(u); sy.push(r[gradeKey]); }
-    if (!sx.length) continue;
-    traces.push({
-      type: 'box', x: sx, y: sy, name: status,
-      marker: { color, size: 5 }, line: { color },
+        if (r['상태구분'] === '1차합격_최종탈락') { sx.push(u); sy.push(r[gradeKey]); sd.push(r['모집단위'] || ''); }
+    if (sx.length) traces.push({
+      type: 'box', x: sx, y: sy, name: '1차합격_최종탈락',
+      customdata: sd,
+      marker: { color: COLORS['1차합격_최종탈락'], size: 5 }, line: { color: COLORS['1차합격_최종탈락'] },
       boxpoints: 'all', jitter: 0.3, pointpos: 0,
-      hovertemplate: '%{x}<br>등평: %{y:.2f}<extra>' + status + '</extra>',
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
+    });
+  }
+
+  // 최종합격: showAdditional 여부에 따라 분기
+  if (state.showAdditional) {
+    // 최초합격 (추가합격 아님)
+    const f1x = [], f1y = [], f1d = [];
+    // 추가합격
+    const f2x = [], f2y = [], f2d = [];
+    for (const u of univs)
+      for (const r of byUniv[u])
+        if (r['상태구분'] === '최종합격') {
+          if (r['is_additional']) { f2x.push(u); f2y.push(r[gradeKey]); f2d.push(r['모집단위'] || ''); }
+          else                    { f1x.push(u); f1y.push(r[gradeKey]); f1d.push(r['모집단위'] || ''); }
+        }
+    if (f1x.length) traces.push({
+      type: 'box', x: f1x, y: f1y, name: '최초합격',
+      customdata: f1d,
+      marker: { color: FIRST_COLOR, size: 5 }, line: { color: FIRST_COLOR },
+      boxpoints: 'all', jitter: 0.3, pointpos: 0,
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>최초합격</extra>',
+    });
+    if (f2x.length) traces.push({
+      type: 'box', x: f2x, y: f2y, name: '추가합격',
+      customdata: f2d,
+      marker: { color: ADD_COLOR, size: 5 }, line: { color: ADD_COLOR },
+      boxpoints: 'all', jitter: 0.3, pointpos: 0,
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>추가합격</extra>',
+    });
+  } else {
+    const sx = [], sy = [], sd = [];
+    for (const u of univs)
+      for (const r of byUniv[u])
+        if (r['상태구분'] === '최종합격') { sx.push(u); sy.push(r[gradeKey]); sd.push(r['모집단위'] || ''); }
+    if (sx.length) traces.push({
+      type: 'box', x: sx, y: sy, name: '최종합격',
+      customdata: sd,
+      marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
+      boxpoints: 'all', jitter: 0.3, pointpos: 0,
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>최종합격</extra>',
     });
   }
 
@@ -556,24 +689,64 @@ function modalShapes() {
 
 function buildBoxTraces(rows, xKey, order) {
   const traces = [];
-  for (const [status, color] of [
-    ['1차탈락', COLORS['1차탈락']],
-    ['1차합격_최종탈락', COLORS['1차합격_최종탈락']],
-    ['최종합격', COLORS['최종합격']],
-  ]) {
-    const sx = [], sy = [];
-    for (const r of rows) {
-      if (r['상태구분'] === status) { sx.push(r[xKey]); sy.push(r[state.grade]); }
-    }
-    if (!sx.length) continue;
-    const isRej = status === '1차탈락';
-    traces.push({
-      type: 'box', x: sx, y: sy, name: status,
-      marker: { color, opacity: isRej ? 0.4 : 1, size: 5 },
-      line: { color },
-      fillcolor: isRej ? 'rgba(204,204,204,0.1)' : undefined,
+
+  // 1차탈락
+  const r1x = [], r1y = [], r1d = [];
+  for (const r of rows)
+    if (r['상태구분'] === '1차탈락') { r1x.push(r[xKey]); r1y.push(r[state.grade]); r1d.push(r['모집단위'] || ''); }
+  if (r1x.length) traces.push({
+    type: 'box', x: r1x, y: r1y, name: '1차탈락 (참고)',
+    customdata: r1d,
+    marker: { color: COLORS['1차탈락'], opacity: 0.4, size: 5 }, line: { color: COLORS['1차탈락'] },
+    fillcolor: 'rgba(204,204,204,0.1)',
+    boxpoints: 'all', jitter: 0.35, pointpos: 0,
+    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
+  });
+
+  // 1차합격_최종탈락
+  const r2x = [], r2y = [], r2d = [];
+  for (const r of rows)
+    if (r['상태구분'] === '1차합격_최종탈락') { r2x.push(r[xKey]); r2y.push(r[state.grade]); r2d.push(r['모집단위'] || ''); }
+  if (r2x.length) traces.push({
+    type: 'box', x: r2x, y: r2y, name: '1차합격_최종탈락',
+    customdata: r2d,
+    marker: { color: COLORS['1차합격_최종탈락'], size: 5 }, line: { color: COLORS['1차합격_최종탈락'] },
+    boxpoints: 'all', jitter: 0.35, pointpos: 0,
+    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
+  });
+
+  // 최종합격: 추가합격 구분 여부
+  if (state.showAdditional) {
+    const f1x = [], f1y = [], f1d = [], f2x = [], f2y = [], f2d = [];
+    for (const r of rows)
+      if (r['상태구분'] === '최종합격') {
+        if (r['is_additional']) { f2x.push(r[xKey]); f2y.push(r[state.grade]); f2d.push(r['모집단위'] || ''); }
+        else                    { f1x.push(r[xKey]); f1y.push(r[state.grade]); f1d.push(r['모집단위'] || ''); }
+      }
+    if (f1x.length) traces.push({
+      type: 'box', x: f1x, y: f1y, name: '최초합격',
+      customdata: f1d,
+      marker: { color: FIRST_COLOR, size: 5 }, line: { color: FIRST_COLOR },
       boxpoints: 'all', jitter: 0.35, pointpos: 0,
-      hovertemplate: '%{x}<br>등평: %{y:.2f}<extra>' + status + '</extra>',
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>최초합격</extra>',
+    });
+    if (f2x.length) traces.push({
+      type: 'box', x: f2x, y: f2y, name: '추가합격',
+      customdata: f2d,
+      marker: { color: ADD_COLOR, size: 5 }, line: { color: ADD_COLOR },
+      boxpoints: 'all', jitter: 0.35, pointpos: 0,
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>추가합격</extra>',
+    });
+  } else {
+    const sx = [], sy = [], sd = [];
+    for (const r of rows)
+      if (r['상태구분'] === '최종합격') { sx.push(r[xKey]); sy.push(r[state.grade]); sd.push(r['모집단위'] || ''); }
+    if (sx.length) traces.push({
+      type: 'box', x: sx, y: sy, name: '최종합격',
+      customdata: sd,
+      marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
+      boxpoints: 'all', jitter: 0.35, pointpos: 0,
+      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>최종합격</extra>',
     });
   }
   return traces;
