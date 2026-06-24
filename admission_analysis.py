@@ -7,7 +7,7 @@ MEDICAL_KEYWORDS = ['의예', '의학', '의과', '치의', '치과', '한의', 
 SPECIAL_KEYWORDS = [
     '기초생활', '기회균형', '기회균등', '고른기회', '사회통합', '차상위',
     '저소득', '이웃사랑', '국가보훈', '농어촌', '다문화', '특수교육',
-    '사회적배려', '사회기여', '연세한마음', '교육기회균형',
+    '사회적배려', '사회기여', '연세한마음', '교육기회균형', '사회공헌',
 ]
 
 
@@ -171,8 +171,8 @@ const COLORS = {
 
 // ── state ──────────────────────────────────────────────
 const state = {
-  years: new Set(YEARS),
-  filter: '전체',
+  years: new Set([2026].filter(y => YEARS.includes(y)).concat(YEARS.includes(2026) ? [] : [YEARS[YEARS.length - 1]])),
+  filter: '학생부종합',
   cat: '일반계열',
 };
 
@@ -188,7 +188,7 @@ function makeBtn(text, cls, active, onClick) {
 // Year buttons (multi-select toggle)
 const yearRow = document.getElementById('year-row');
 YEARS.forEach(y => {
-  const b = makeBtn(y + '년', 'year-btn', true, () => {
+  const b = makeBtn(y + '년', 'year-btn', state.years.has(y), () => {
     if (state.years.has(y) && state.years.size === 1) return; // 최소 1개 유지
     state.years.has(y) ? state.years.delete(y) : state.years.add(y);
     b.classList.toggle('on', state.years.has(y));
@@ -201,7 +201,7 @@ YEARS.forEach(y => {
 const FILTERS = ['전체', '학생부종합', '논술', '특수전형'];
 const filterRow = document.getElementById('filter-row');
 FILTERS.forEach(f => {
-  const b = makeBtn(f, 'filter-btn', f === state.filter, () => {
+  const b = makeBtn(f, 'filter-btn', f === '학생부종합', () => {
     state.filter = f;
     filterRow.querySelectorAll('.filter-btn').forEach(x => x.classList.remove('on'));
     b.classList.add('on');
@@ -338,7 +338,7 @@ function render() {
       tickvals,
       ticktext,
     },
-    yaxis: { title: '국영수과 등급평균', autorange: 'reversed' },
+    yaxis: { title: '국영수과 등급평균', range: [9.2, 0.8], fixedrange: false },
     boxmode: 'group',
     legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
     height: 620,
