@@ -15,7 +15,7 @@ def classify_admission(전형명칭, 전형유형):
     n = str(전형명칭)
     t = str(전형유형)
     if any(kw in n for kw in SPECIAL_KEYWORDS):
-        return '특수전형'
+        return '특별전형'
     if t == '논술' or '논술' in n:
         return '논술'
     if t == '종합' or '종합' in n:
@@ -272,7 +272,7 @@ YEARS.forEach(y => {
 });
 
 // Filter buttons
-const FILTERS = ['전체', '학생부종합', '논술', '특수전형'];
+const FILTERS = ['전체', '학생부종합', '논술', '특별전형'];
 const filterRow = document.getElementById('filter-row');
 FILTERS.forEach(f => {
   const b = makeBtn(f, 'filter-btn', f === '학생부종합', () => {
