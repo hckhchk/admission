@@ -146,6 +146,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <div class="ctrl-label">계열</div>
       <div class="btn-row" id="cat-row"></div>
     </div>
+    <div class="ctrl-group" style="margin-left:auto; align-self:flex-end;">
+      <div style="font-size:12px; color:#999; line-height:1.6;">
+        x축: <b>대학명(지원학생수)</b><br>
+        지원학생수 = 1차합격 이상 건수
+      </div>
+    </div>
   </div>
 
   <div class="chart-wrap">
@@ -226,16 +232,15 @@ function median(arr) {
 }
 
 function getOrder(byUniv) {
-  const finalMed = {}, firstMed = {};
+  const sortKey = {};
   for (const [u, rows] of Object.entries(byUniv)) {
     const finals = rows.filter(r => r.상태구분 === '최종합격').map(r => r['국영수과 등평']);
     const firsts = rows.filter(r => r.상태구분 === '1차합격_최종탈락').map(r => r['국영수과 등평']);
-    if (finals.length) finalMed[u] = median(finals);
-    else if (firsts.length) firstMed[u] = median(firsts);
+    // 최종합격 중앙값 우선, 없으면 1차합격 중앙값 — 통합 정렬
+    if (finals.length) sortKey[u] = median(finals);
+    else if (firsts.length) sortKey[u] = median(firsts);
   }
-  const withFinal = Object.entries(finalMed).sort((a, b) => a[1] - b[1]).map(x => x[0]);
-  const withFirst = Object.entries(firstMed).sort((a, b) => a[1] - b[1]).map(x => x[0]);
-  return [...withFinal, ...withFirst];
+  return Object.entries(sortKey).sort((a, b) => a[1] - b[1]).map(x => x[0]);
 }
 
 // ── render ─────────────────────────────────────────────
@@ -275,7 +280,7 @@ function render() {
     nCount[u] = byUniv[u].filter(r => r['상태구분'] !== '1차탈락').length;
   }
   const tickvals = univs;
-  const ticktext = univs;  // 대학명만 표시
+  const ticktext = univs.map(u => `${u}(${nCount[u]})`);
 
   const traces = [];
 
@@ -318,21 +323,6 @@ function render() {
       hovertemplate: '%{x}<br>등평: %{y:.2f}<extra>' + status + '</extra>',
     });
   }
-
-  // n수: 차트 최상단에 scatter text로 표시 (tick label 겹침 방지)
-  const allGrades = rows.map(r => r['국영수과 등평']);
-  const yTop = allGrades.length ? Math.min(...allGrades) - 0.3 : 0.7;
-  traces.push({
-    type: 'scatter',
-    x: univs,
-    y: univs.map(() => yTop),
-    mode: 'text',
-    text: univs.map(u => `n=${nCount[u]}`),
-    textfont: { size: 10, color: '#888' },
-    textposition: 'top center',
-    showlegend: false,
-    hoverinfo: 'skip',
-  });
 
   const yearLabel = [...state.years].sort().join(', ');
   const catLabel = state.cat;
