@@ -50,6 +50,7 @@ def prepare_data(file_path):
         '대학교명':      ['대학교명', '대학', '학교'],
         '국영수과 등평': ['국영수과 등평', '국영수과등평'],
         '전교과 등평':   ['전교과 등평', '전교과등평'],
+        '학년':          ['학년'],
         '모집단위':      ['모집 단위(학과)', '모집단위', '학과', '모집'],
         '전형명칭':      ['전형명칭', '전형명'],
         '전형유형':      ['전형\n유형', '전형유형', '유형'],
@@ -95,7 +96,7 @@ def prepare_data(file_path):
         lambda r: classify_admission(r.get('전형명칭', ''), r.get('전형유형', '')), axis=1
     )
 
-    cols = ['대입연도', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '상태구분', 'is_medical', 'admission_type']
+    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '상태구분', 'is_medical', 'admission_type']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -184,6 +185,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div class="controls">
     <div class="ctrl-group">
+      <div class="ctrl-label">학년</div>
+      <div class="btn-row" id="grade-year-row"></div>
+    </div>
+    <div class="ctrl-group">
       <div class="ctrl-label">입시 연도</div>
       <div class="btn-row" id="year-row"></div>
     </div>
@@ -244,6 +249,7 @@ const COLORS = {
 // ── state ──────────────────────────────────────────────
 const state = {
   years: new Set([2026].filter(y => YEARS.includes(y)).concat(YEARS.includes(2026) ? [] : [YEARS[YEARS.length-1]])),
+  gradeYears: new Set([2, 3]),
   filter: '학생부종합',
   cat: '일반계열',
   grade: '국영수과 등평',
@@ -258,6 +264,18 @@ function makeBtn(text, cls, active, onClick) {
   b.addEventListener('click', onClick);
   return b;
 }
+
+// 학년 버튼 (multi-select)
+const gradeYearRow = document.getElementById('grade-year-row');
+[2, 3].forEach(g => {
+  const b = makeBtn(g + '학년', 'year-btn', true, () => {
+    if (state.gradeYears.has(g) && state.gradeYears.size === 1) return;
+    state.gradeYears.has(g) ? state.gradeYears.delete(g) : state.gradeYears.add(g);
+    b.classList.toggle('on', state.gradeYears.has(g));
+    render();
+  });
+  gradeYearRow.appendChild(b);
+});
 
 // Year buttons (multi-select)
 const yearRow = document.getElementById('year-row');
@@ -350,6 +368,7 @@ function renderBox() {
 
   const rows = RAW.filter(r =>
     state.years.has(r['대입연도']) &&
+    state.gradeYears.has(r['학년']) &&
     r['is_medical'] === isMedical &&
     (state.filter === '전체' || r['admission_type'] === state.filter) &&
     r[gradeKey] != null
@@ -566,6 +585,7 @@ function renderModalYear() {
   const allYears = [...YEARS].sort();
   const rows = RAW.filter(r =>
     r['대학교명'] === drillUniv &&
+    state.gradeYears.has(r['학년']) &&
     (state.filter === '전체' || r['admission_type'] === state.filter) &&
     r[gradeKey] != null
   ).map(r => ({ ...r, _yearLabel: String(r['대입연도']) + '년' }));
@@ -591,6 +611,7 @@ function renderModalDept() {
   const rows = RAW.filter(r =>
     r['대학교명'] === drillUniv &&
     state.years.has(r['대입연도']) &&
+    state.gradeYears.has(r['학년']) &&
     (state.filter === '전체' || r['admission_type'] === state.filter) &&
     r[gradeKey] != null &&
     r['모집단위']
