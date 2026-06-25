@@ -466,39 +466,38 @@ function renderBox() {
     });
   }
 
-  // 최종합격: 3개 box 트레이스는 항상 동일, 추가합격 ON 시 scatter 오버레이만 추가
+  // 최종합격: 단일 트레이스 유지, 추가합격 ON 시 colorscale로 점 색만 변경
+  // (marker.color 숫자배열 + colorscale → box 통계/폭 완전 불변)
   {
-    const sx = [], sy = [], sd = [];
-    const f2x = [], f2y = [], f2d = [];
+    const sx = [], sy = [], sd = [], sc = [];
     for (const u of univs)
       for (const r of byUniv[u])
         if (r['상태구분'] === '최종합격') {
           const isAdd = !!r['is_additional'];
-          const dept = r['모집단위'] || '';
-          sx.push(u); sy.push(r[gradeKey]); sd.push([dept, isAdd ? '추가합격' : '최초합격']);
-          if (isAdd) { f2x.push(u); f2y.push(r[gradeKey]); f2d.push(dept); }
+          sx.push(u); sy.push(r[gradeKey]);
+          sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격']);
+          sc.push(isAdd ? 1 : 0);
         }
     if (sx.length) {
-      // 최종합격 box: 항상 동일한 트레이스 (box 통계/폭 불변)
+      const mkr = state.showAdditional
+        ? { color: sc, colorscale: [[0, FIRST_COLOR], [1, ADD_COLOR]],
+            cmin: 0, cmax: 1, showscale: false, size: 5 }
+        : { color: COLORS['최종합격'], size: 5 };
       traces.push({
         type: 'box', x: sx, y: sy, name: '최종합격',
-        customdata: sd,
-        marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
+        customdata: sd, marker: mkr, line: { color: COLORS['최종합격'] },
         boxpoints: 'all', jitter: 0.3, pointpos: 0,
         hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
       });
-      // 추가합격 ON: 추가합격 점에만 주황 다이아몬드를 scatter로 오버레이
-      if (state.showAdditional && f2x.length) {
+      // 추가합격 ON 시 범례용 더미 scatter
+      if (state.showAdditional) {
         traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
           name: '└ 최초합격', showlegend: true,
-          marker: { color: FIRST_COLOR, size: 8, symbol: 'circle' } });
-        traces.push({
-          type: 'scatter', x: f2x, y: f2y, name: '└ 추가합격',
-          mode: 'markers', customdata: f2d,
-          marker: { color: ADD_COLOR, size: 10, symbol: 'diamond',
-                    line: { color: 'white', width: 1.5 } },
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 추가합격<extra></extra>',
-        });
+          marker: { color: FIRST_COLOR, size: 8 } });
+        if (sc.some(v => v === 1))
+          traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+            name: '└ 추가합격', showlegend: true,
+            marker: { color: ADD_COLOR, size: 8 } });
       }
     }
   }
@@ -673,36 +672,35 @@ function buildBoxTraces(rows, xKey, order) {
     hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
   });
 
-  // 최종합격: box 트레이스는 항상 동일, 추가합격 ON 시 scatter 오버레이만 추가
+  // 최종합격: 단일 트레이스 유지, 추가합격 ON 시 colorscale로 점 색만 변경
   {
-    const sx = [], sy = [], sd = [];
-    const f2x = [], f2y = [], f2d = [];
+    const sx = [], sy = [], sd = [], sc = [];
     for (const r of rows)
       if (r['상태구분'] === '최종합격') {
         const isAdd = !!r['is_additional'];
-        const dept = r['모집단위'] || '';
-        sx.push(r[xKey]); sy.push(r[state.grade]); sd.push([dept, isAdd ? '추가합격' : '최초합격']);
-        if (isAdd) { f2x.push(r[xKey]); f2y.push(r[state.grade]); f2d.push(dept); }
+        sx.push(r[xKey]); sy.push(r[state.grade]);
+        sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격']);
+        sc.push(isAdd ? 1 : 0);
       }
     if (sx.length) {
+      const mkr = state.showAdditional
+        ? { color: sc, colorscale: [[0, FIRST_COLOR], [1, ADD_COLOR]],
+            cmin: 0, cmax: 1, showscale: false, size: 5 }
+        : { color: COLORS['최종합격'], size: 5 };
       traces.push({
         type: 'box', x: sx, y: sy, name: '최종합격',
-        customdata: sd,
-        marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
+        customdata: sd, marker: mkr, line: { color: COLORS['최종합격'] },
         boxpoints: 'all', jitter: 0.35, pointpos: 0,
         hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
       });
-      if (state.showAdditional && f2x.length) {
+      if (state.showAdditional) {
         traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
           name: '└ 최초합격', showlegend: true,
-          marker: { color: FIRST_COLOR, size: 8, symbol: 'circle' } });
-        traces.push({
-          type: 'scatter', x: f2x, y: f2y, name: '└ 추가합격',
-          mode: 'markers', customdata: f2d,
-          marker: { color: ADD_COLOR, size: 10, symbol: 'diamond',
-                    line: { color: 'white', width: 1.5 } },
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 추가합격<extra></extra>',
-        });
+          marker: { color: FIRST_COLOR, size: 8 } });
+        if (sc.some(v => v === 1))
+          traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+            name: '└ 추가합격', showlegend: true,
+            marker: { color: ADD_COLOR, size: 8 } });
       }
     }
   }
