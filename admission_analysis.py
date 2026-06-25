@@ -529,7 +529,14 @@ function renderBox() {
   const noPassUnivs = Object.keys(byUniv).filter(u => !orderedUnivs.includes(u));
   const univs = [...orderedUnivs, ...noPassUnivs];
   if (!univs.length) {
-    document.getElementById('chart').innerHTML = '<div class="empty-msg">해당 조건의 데이터가 없습니다.</div>';
+    // Plotly.react 사용 → Plotly 컨테이너를 유지해야 다음 render가 정상 작동
+    Plotly.react('chart', [], {
+      height: 300, plot_bgcolor: '#fafbff',
+      xaxis: { visible: false }, yaxis: { visible: false },
+      annotations: [{ text: '해당 조건의 데이터가 없습니다.',
+        xref: 'paper', yref: 'paper', x: 0.5, y: 0.5,
+        showarrow: false, font: { size: 16, color: '#aaa' } }],
+    }, { responsive: true });
     document.getElementById('grade-summary').innerHTML = '';
     return;
   }
@@ -571,10 +578,9 @@ function renderBox() {
     });
   }
 
-  // 최종합격: 항상 전체 통계 box 유지, 추가합격 ON 시 ghost box로 점 색 구분
+  // 최종합격: 3개 box 트레이스는 항상 동일, 추가합격 ON 시 scatter 오버레이만 추가
   {
     const sx = [], sy = [], sd = [];
-    const f1x = [], f1y = [], f1d = [];
     const f2x = [], f2y = [], f2d = [];
     for (const u of univs)
       for (const r of byUniv[u])
@@ -583,46 +589,26 @@ function renderBox() {
           const dept = r['모집단위'] || '';
           sx.push(u); sy.push(r[gradeKey]); sd.push([dept, isAdd ? '추가합격' : '최초합격']);
           if (isAdd) { f2x.push(u); f2y.push(r[gradeKey]); f2d.push(dept); }
-          else       { f1x.push(u); f1y.push(r[gradeKey]); f1d.push(dept); }
         }
     if (sx.length) {
-      if (!state.showAdditional) {
-        // 기본: 단일 trace, 점 포함. customdata 2D → 호버에서 학과+구분 모두 표시
+      // 최종합격 box: 항상 동일한 트레이스 (box 통계/폭 불변)
+      traces.push({
+        type: 'box', x: sx, y: sy, name: '최종합격',
+        customdata: sd,
+        marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
+        boxpoints: 'all', jitter: 0.3, pointpos: 0,
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
+      });
+      // 추가합격 ON: 추가합격 점에만 주황 다이아몬드를 scatter로 오버레이
+      if (state.showAdditional && f2x.length) {
+        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+          name: '└ 최초합격', showlegend: true,
+          marker: { color: FIRST_COLOR, size: 8, symbol: 'circle' } });
         traces.push({
-          type: 'box', x: sx, y: sy, name: '최종합격',
-          customdata: sd,
-          marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
-          boxpoints: 'all', jitter: 0.3, pointpos: 0,
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
-        });
-      } else {
-        // 추가합격 구분: 통계 box (점 숨김) + ghost box 2개로 점만 표시
-        // ghost box에 width:0 → 그룹 폭 계산에 영향 없음
-        traces.push({
-          type: 'box', x: sx, y: sy, name: '최종합격',
-          line: { color: COLORS['최종합격'] },
-          fillcolor: 'rgba(12,77,162,0.12)',
-          boxpoints: false,
-          offsetgroup: 'final',
-        });
-        if (f1x.length) traces.push({
-          type: 'box', x: f1x, y: f1y, name: '└ 최초합격',
-          customdata: f1d,
-          boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
-          line: { color: 'rgba(0,0,0,0)', width: 0 },
-          marker: { color: FIRST_COLOR, size: 6, opacity: 0.85 },
-          offsetgroup: 'final',
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 최초합격<extra></extra>',
-        });
-        if (f2x.length) traces.push({
-          type: 'box', x: f2x, y: f2y, name: '└ 추가합격',
-          customdata: f2d,
-          boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
-          line: { color: 'rgba(0,0,0,0)', width: 0 },
-          marker: { color: ADD_COLOR, size: 6, opacity: 0.9 },
-          offsetgroup: 'final',
+          type: 'scatter', x: f2x, y: f2y, name: '└ 추가합격',
+          mode: 'markers', customdata: f2d,
+          marker: { color: ADD_COLOR, size: 10, symbol: 'diamond',
+                    line: { color: 'white', width: 1.5 } },
           hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 추가합격<extra></extra>',
         });
       }
@@ -650,33 +636,32 @@ function renderBox() {
   const typeLabel = state.filter === '전체' ? '' : ` · ${state.filter}`;
   const gradeLabel = gradeKey === '국영수과 등평' ? '국영수과' : '전교과';
 
-  // 모바일: 가로 스크롤 + Plotly 터치 인터랙션 비활성화
   const isMobile = window.innerWidth <= 680;
-  const chartW = isMobile ? Math.max(860, univs.length * 52 + 220) : undefined;
-  const chartH = isMobile ? 460 : 620;
+  // 모바일: 화면 너비에 맞춰 초기 표시, 핀치줌으로 확대/축소
+  const chartW = isMobile ? Math.max(window.innerWidth - 16, univs.length * 36 + 160) : undefined;
+  const chartH = isMobile ? 440 : 620;
 
   Plotly.react('chart', traces, {
-    title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: isMobile ? 13 : 16 } },
+    title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: isMobile ? 12 : 16 } },
     xaxis: {
       title: { text: '대학명 (최종합격수 / 총지원수)', font: { size: 11 } },
       categoryorder: 'array', categoryarray: univs,
       tickangle: -38, tickvals: univs, ticktext: univs.map(u => `${u}(${nFinal[u]}/${nTotal[u]})`),
-      fixedrange: isMobile,
+      fixedrange: false,
     },
-    yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: isMobile },
+    yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: true },
+    dragmode: isMobile ? 'pan' : 'zoom',
     boxmode: 'group',
     legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
-    height: chartH,
-    width: chartW,
-    margin: { b: 170, t: 60, r: isMobile ? 10 : 80, l: isMobile ? 40 : 60 },
+    height: chartH, width: chartW,
+    margin: { b: 170, t: 60, r: isMobile ? 8 : 80, l: isMobile ? 38 : 60 },
     plot_bgcolor: '#fafbff',
     shapes, annotations,
-  }, { responsive: !isMobile, scrollZoom: false, displayModeBar: !isMobile });
-
-  // 대학 클릭 → 연도별 드릴다운
-  document.getElementById('chart').on('plotly_click', data => {
-    const univ = data.points[0].x;
-    openDrilldown(univ);
+  }, {
+    responsive: !isMobile,
+    scrollZoom: true,
+    displayModeBar: isMobile ? true : 'hover',
+    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toImage'],
   });
 
   // 합격권 요약
@@ -800,10 +785,9 @@ function buildBoxTraces(rows, xKey, order) {
     hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
   });
 
-  // 최종합격: 항상 전체 통계 box 유지, 추가합격 ON 시 ghost box로 점 색 구분
+  // 최종합격: box 트레이스는 항상 동일, 추가합격 ON 시 scatter 오버레이만 추가
   {
     const sx = [], sy = [], sd = [];
-    const f1x = [], f1y = [], f1d = [];
     const f2x = [], f2y = [], f2d = [];
     for (const r of rows)
       if (r['상태구분'] === '최종합격') {
@@ -811,42 +795,24 @@ function buildBoxTraces(rows, xKey, order) {
         const dept = r['모집단위'] || '';
         sx.push(r[xKey]); sy.push(r[state.grade]); sd.push([dept, isAdd ? '추가합격' : '최초합격']);
         if (isAdd) { f2x.push(r[xKey]); f2y.push(r[state.grade]); f2d.push(dept); }
-        else       { f1x.push(r[xKey]); f1y.push(r[state.grade]); f1d.push(dept); }
       }
     if (sx.length) {
-      if (!state.showAdditional) {
+      traces.push({
+        type: 'box', x: sx, y: sy, name: '최종합격',
+        customdata: sd,
+        marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
+        boxpoints: 'all', jitter: 0.35, pointpos: 0,
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
+      });
+      if (state.showAdditional && f2x.length) {
+        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+          name: '└ 최초합격', showlegend: true,
+          marker: { color: FIRST_COLOR, size: 8, symbol: 'circle' } });
         traces.push({
-          type: 'box', x: sx, y: sy, name: '최종합격',
-          customdata: sd,
-          marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
-          boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
-        });
-      } else {
-        traces.push({
-          type: 'box', x: sx, y: sy, name: '최종합격',
-          line: { color: COLORS['최종합격'] },
-          fillcolor: 'rgba(12,77,162,0.12)',
-          boxpoints: false, offsetgroup: 'final',
-        });
-        if (f1x.length) traces.push({
-          type: 'box', x: f1x, y: f1y, name: '└ 최초합격',
-          customdata: f1d,
-          boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
-          line: { color: 'rgba(0,0,0,0)', width: 0 },
-          marker: { color: FIRST_COLOR, size: 6, opacity: 0.85 },
-          offsetgroup: 'final',
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 최초합격<extra></extra>',
-        });
-        if (f2x.length) traces.push({
-          type: 'box', x: f2x, y: f2y, name: '└ 추가합격',
-          customdata: f2d,
-          boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
-          line: { color: 'rgba(0,0,0,0)', width: 0 },
-          marker: { color: ADD_COLOR, size: 6, opacity: 0.9 },
-          offsetgroup: 'final',
+          type: 'scatter', x: f2x, y: f2y, name: '└ 추가합격',
+          mode: 'markers', customdata: f2d,
+          marker: { color: ADD_COLOR, size: 10, symbol: 'diamond',
+                    line: { color: 'white', width: 1.5 } },
           hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 추가합격<extra></extra>',
         });
       }
@@ -939,6 +905,14 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 function render() { renderBox(); }
 
 render();
+
+// plotly_click 핸들러는 최초 한 번만 바인딩
+document.getElementById('chart').on('plotly_click', data => {
+  if (!data || !data.points || !data.points.length) return;
+  const pt = data.points[0];
+  const univ = pt.x || (pt.data && pt.data.x && pt.data.x[pt.pointIndex]);
+  if (univ) openDrilldown(univ);
+});
 </script>
 </body>
 </html>"""
