@@ -152,6 +152,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   .chart-wrap { background: white; border-radius: 10px; padding: 16px;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .chart-scroll-wrap { width: 100%; overflow: hidden; }
   #chart { width: 100%; }
   .empty-msg { text-align: center; padding: 60px; color: #aaa; font-size: 15px; }
 
@@ -244,8 +245,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
     .grade-input { width: 100%; max-width: 160px; min-height: 36px; font-size: 14px; }
 
-    /* 차트 영역 */
-    .chart-wrap { border-radius: 0; margin: 0 8px; }
+    /* 차트 영역: 가로 스크롤 */
+    .chart-wrap { border-radius: 0; margin: 0 4px; padding: 8px 4px; }
+    .chart-scroll-wrap {
+      overflow-x: auto; overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
+    #chart { min-width: 800px; width: max-content; }
 
     /* 토글 그룹 */
     .toggle-group { flex-direction: row; flex-wrap: wrap; gap: 16px; }
@@ -338,7 +344,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 
   <div class="chart-wrap">
-    <div id="chart"></div>
+    <div class="chart-scroll-wrap">
+      <div id="chart"></div>
+    </div>
   </div>
   <div id="grade-summary"></div>
 </div>
@@ -571,50 +579,50 @@ function renderBox() {
     for (const u of univs)
       for (const r of byUniv[u])
         if (r['상태구분'] === '최종합격') {
-          sx.push(u); sy.push(r[gradeKey]); sd.push(r['모집단위'] || '');
-          if (!!r['is_additional']) { f2x.push(u); f2y.push(r[gradeKey]); f2d.push(r['모집단위'] || ''); }
-          else                      { f1x.push(u); f1y.push(r[gradeKey]); f1d.push(r['모집단위'] || ''); }
+          const isAdd = !!r['is_additional'];
+          const dept = r['모집단위'] || '';
+          sx.push(u); sy.push(r[gradeKey]); sd.push([dept, isAdd ? '추가합격' : '최초합격']);
+          if (isAdd) { f2x.push(u); f2y.push(r[gradeKey]); f2d.push(dept); }
+          else       { f1x.push(u); f1y.push(r[gradeKey]); f1d.push(dept); }
         }
     if (sx.length) {
       if (!state.showAdditional) {
-        // 기본: 단일 trace, 점 포함
+        // 기본: 단일 trace, 점 포함. customdata 2D → 호버에서 학과+구분 모두 표시
         traces.push({
           type: 'box', x: sx, y: sy, name: '최종합격',
           customdata: sd,
           marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
           boxpoints: 'all', jitter: 0.3, pointpos: 0,
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>최종합격</extra>',
+          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
         });
       } else {
         // 추가합격 구분: 통계 box (점 숨김) + ghost box 2개로 점만 표시
+        // ghost box에 width:0 → 그룹 폭 계산에 영향 없음
         traces.push({
           type: 'box', x: sx, y: sy, name: '최종합격',
-          marker: { color: COLORS['최종합격'], size: 4, opacity: 0 },
           line: { color: COLORS['최종합격'] },
           fillcolor: 'rgba(12,77,162,0.12)',
           boxpoints: false,
-          offsetgroup: 'final', alignmentgroup: 'final',
+          offsetgroup: 'final',
         });
-        // 최초합격 점 (파랑)
         if (f1x.length) traces.push({
           type: 'box', x: f1x, y: f1y, name: '└ 최초합격',
           customdata: f1d,
           boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0,
+          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
           line: { color: 'rgba(0,0,0,0)', width: 0 },
           marker: { color: FIRST_COLOR, size: 6, opacity: 0.85 },
-          offsetgroup: 'final', alignmentgroup: 'final',
+          offsetgroup: 'final',
           hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 최초합격<extra></extra>',
         });
-        // 추가합격 점 (주황)
         if (f2x.length) traces.push({
           type: 'box', x: f2x, y: f2y, name: '└ 추가합격',
           customdata: f2d,
           boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0,
+          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
           line: { color: 'rgba(0,0,0,0)', width: 0 },
           marker: { color: ADD_COLOR, size: 6, opacity: 0.9 },
-          offsetgroup: 'final', alignmentgroup: 'final',
+          offsetgroup: 'final',
           hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 추가합격<extra></extra>',
         });
       }
@@ -642,21 +650,28 @@ function renderBox() {
   const typeLabel = state.filter === '전체' ? '' : ` · ${state.filter}`;
   const gradeLabel = gradeKey === '국영수과 등평' ? '국영수과' : '전교과';
 
+  // 모바일: 가로 스크롤 + Plotly 터치 인터랙션 비활성화
+  const isMobile = window.innerWidth <= 680;
+  const chartW = isMobile ? Math.max(860, univs.length * 52 + 220) : undefined;
+  const chartH = isMobile ? 460 : 620;
+
   Plotly.react('chart', traces, {
-    title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: 16 } },
+    title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: isMobile ? 13 : 16 } },
     xaxis: {
-      title: '대학교 (클릭 시 연도별 상세)',
+      title: { text: '대학명 (최종합격수 / 총지원수)', font: { size: 11 } },
       categoryorder: 'array', categoryarray: univs,
-      title: '대학명 (최종합격수 / 총지원수)',
       tickangle: -38, tickvals: univs, ticktext: univs.map(u => `${u}(${nFinal[u]}/${nTotal[u]})`),
+      fixedrange: isMobile,
     },
-    yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: false },
+    yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: isMobile },
     boxmode: 'group',
     legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
-    height: 620, margin: { b: 170, t: 60, r: 80 },
+    height: chartH,
+    width: chartW,
+    margin: { b: 170, t: 60, r: isMobile ? 10 : 80, l: isMobile ? 40 : 60 },
     plot_bgcolor: '#fafbff',
     shapes, annotations,
-  }, { responsive: true });
+  }, { responsive: !isMobile, scrollZoom: false, displayModeBar: !isMobile });
 
   // 대학 클릭 → 연도별 드릴다운
   document.getElementById('chart').on('plotly_click', data => {
@@ -792,9 +807,11 @@ function buildBoxTraces(rows, xKey, order) {
     const f2x = [], f2y = [], f2d = [];
     for (const r of rows)
       if (r['상태구분'] === '최종합격') {
-        sx.push(r[xKey]); sy.push(r[state.grade]); sd.push(r['모집단위'] || '');
-        if (!!r['is_additional']) { f2x.push(r[xKey]); f2y.push(r[state.grade]); f2d.push(r['모집단위'] || ''); }
-        else                      { f1x.push(r[xKey]); f1y.push(r[state.grade]); f1d.push(r['모집단위'] || ''); }
+        const isAdd = !!r['is_additional'];
+        const dept = r['모집단위'] || '';
+        sx.push(r[xKey]); sy.push(r[state.grade]); sd.push([dept, isAdd ? '추가합격' : '최초합격']);
+        if (isAdd) { f2x.push(r[xKey]); f2y.push(r[state.grade]); f2d.push(dept); }
+        else       { f1x.push(r[xKey]); f1y.push(r[state.grade]); f1d.push(dept); }
       }
     if (sx.length) {
       if (!state.showAdditional) {
@@ -803,35 +820,33 @@ function buildBoxTraces(rows, xKey, order) {
           customdata: sd,
           marker: { color: COLORS['최종합격'], size: 5 }, line: { color: COLORS['최종합격'] },
           boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>최종합격</extra>',
+          hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
         });
       } else {
         traces.push({
           type: 'box', x: sx, y: sy, name: '최종합격',
-          marker: { color: COLORS['최종합격'], size: 4, opacity: 0 },
           line: { color: COLORS['최종합격'] },
           fillcolor: 'rgba(12,77,162,0.12)',
-          boxpoints: false,
-          offsetgroup: 'final', alignmentgroup: 'final',
+          boxpoints: false, offsetgroup: 'final',
         });
         if (f1x.length) traces.push({
           type: 'box', x: f1x, y: f1y, name: '└ 최초합격',
           customdata: f1d,
           boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0,
+          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
           line: { color: 'rgba(0,0,0,0)', width: 0 },
           marker: { color: FIRST_COLOR, size: 6, opacity: 0.85 },
-          offsetgroup: 'final', alignmentgroup: 'final',
+          offsetgroup: 'final',
           hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 최초합격<extra></extra>',
         });
         if (f2x.length) traces.push({
           type: 'box', x: f2x, y: f2y, name: '└ 추가합격',
           customdata: f2d,
           boxpoints: 'all', jitter: 0.35, pointpos: 0,
-          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0,
+          fillcolor: 'rgba(0,0,0,0)', whiskerwidth: 0, width: 0,
           line: { color: 'rgba(0,0,0,0)', width: 0 },
           marker: { color: ADD_COLOR, size: 6, opacity: 0.9 },
-          offsetgroup: 'final', alignmentgroup: 'final',
+          offsetgroup: 'final',
           hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<br>구분: 추가합격<extra></extra>',
         });
       }
