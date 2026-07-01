@@ -1,7 +1,7 @@
 {
-  "name": "대학 입시 결과 분석",
-  "short_name": "입시 분석",
-  "description": "대학교별 내신 등급 입시 결과 분석 대시보드",
+  "name": "한성과학고 입시 결과 분석",
+  "short_name": "한성과 입시",
+  "description": "한성과학고등학교 대학교별 내신 등급 입시 결과 분석 대시보드",
   "start_url": "./University_Admission_Results_2022-2026_admission_analysis.html",
   "display": "standalone",
   "orientation": "any",

@@ -16,6 +16,8 @@ def classify_admission(전형명칭, 전형유형):
     t = str(전형유형)
     if any(kw in n for kw in SPECIAL_KEYWORDS):
         return '특별전형'
+    if '실기' in t or '실적' in t or '실기' in n or '실적' in n:
+        return '특기자전형'
     if t == '논술' or '논술' in n:
         return '논술'
     if t == '종합' or '종합' in n:
@@ -82,7 +84,8 @@ def prepare_data(file_path):
     def categorize_status(row):
         first = str(row['1차결과']).strip()
         final = str(row['결과']).strip()
-        if final == '합격':
+        # 'Early 합격'은 반도체시스템인재전형Ⅰ 등 Early 방식 최종합격
+        if final == '합격' or final == 'Early 합격':
             return '최종합격'
         if first == '합격':
             return '1차합격_최종탈락'
@@ -97,14 +100,53 @@ def prepare_data(file_path):
         lambda r: classify_admission(r.get('전형명칭', ''), r.get('전형유형', '')), axis=1
     )
 
-    # 추가합격: 최종합격이지만 최초합격이 아닌 경우
+    # KAIST 창의도전전형 → 별도 대학으로 분리
+    if '전형명칭' in df.columns:
+        creative_mask = (
+            df['대학교명'].str.contains('KAIST', na=False) &
+            df['전형명칭'].astype(str).str.contains('창의도전', na=False)
+        )
+        df.loc[creative_mask, '대학교명'] = 'KAIST(창의도전)'
+        # 반도체시스템인재전형Ⅰ (2026만, Ⅱ 제외) → KAIST(창의도전)으로 편입
+        # U+2160=Ⅰ, U+2161=Ⅱ; Ⅱ는 KAIST 일반전형으로 유지
+        semi_mask = (
+            (df['대학교명'] == 'KAIST') &
+            (df['대입연도'] == 2026) &
+            df['전형명칭'].astype(str).str.contains('반도체시스템인재', na=False) &
+            ~df['전형명칭'].astype(str).str.contains('Ⅱ', na=False)
+        )
+        df.loc[semi_mask, '대학교명'] = 'KAIST(창의도전)'
+    # KAIST 일반전형에서 Early 합격 허수 행 제거
+    # (창의도전전형 합격자가 일반전형 평가를 받지 않은 케이스)
     if '최초합격' in df.columns:
-        df['is_additional'] = (df['상태구분'] == '최종합격') & \
-                              (df['최초합격'].astype(str).str.strip() != '합격')
+        early_dummy = (
+            (df['대학교명'] == 'KAIST') &
+            df['최초합격'].astype(str).str.strip().str.contains('Early', case=False, na=False) &
+            (df['상태구분'] != '최종합격')
+        )
+        df = df[~early_dummy].reset_index(drop=True)
+
+    # 전형명칭이 없는 경우 빈 값으로 보완 (전형별 드릴다운용)
+    if '전형명칭' not in df.columns:
+        df['전형명칭'] = ''
+
+    # 추가합격: 최종합격이지만 최초합격이 아닌 경우
+    # 미응시: 1차합격_최종탈락 중 최초합격 열이 '미응시'인 케이스 (유의미성 낮음)
+    if '최초합격' in df.columns:
+        # 'Early 합격' 최종결과는 직접합격 → 추가합격 아님
+        is_early_final = df['결과'].astype(str).str.strip() == 'Early 합격'
+        df['is_additional'] = (
+            (df['상태구분'] == '최종합격') &
+            (df['최초합격'].astype(str).str.strip() != '합격') &
+            (~is_early_final)
+        )
+        df['is_nonattend'] = (df['상태구분'] == '1차합격_최종탈락') & \
+                             (df['최초합격'].astype(str).str.strip() == '미응시')
     else:
         df['is_additional'] = False
+        df['is_nonattend'] = False
 
-    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '상태구분', 'is_additional', 'is_medical', 'admission_type']
+    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -120,8 +162,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="입시 분석">
 <link rel="manifest" href="manifest.json">
-<title>입시 결과 분석</title>
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<title>한성과학고등학교 대학교별 내신 등급 입시 결과 분석</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; background: #f0f2f5; color: #222; }
@@ -289,7 +331,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 <div class="page">
-  <h2>대학교별 내신 등급 입시 결과 분석</h2>
+  <h2>한성과학고등학교 대학교별 내신 등급 입시 결과 분석</h2>
 
   <div class="controls">
     <div class="ctrl-group">
@@ -360,6 +402,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="modal-tabs">
       <button class="modal-tab on" onclick="switchModalTab('year', this)">연도별</button>
       <button class="modal-tab"    onclick="switchModalTab('dept', this)">학과별</button>
+      <button class="modal-tab"    onclick="switchModalTab('type', this)">전형별</button>
     </div>
     <div id="modal-chart"></div>
   </div>
@@ -424,7 +467,7 @@ YEARS.forEach(y => {
 });
 
 // Filter buttons
-const FILTERS = ['전체', '학생부종합', '논술', '특별전형'];
+const FILTERS = ['전체', '학생부종합', '논술', '특기자전형', '특별전형'];
 const filterRow = document.getElementById('filter-row');
 FILTERS.forEach(f => {
   const b = makeBtn(f, 'filter-btn', f === '학생부종합', () => {
@@ -509,6 +552,7 @@ function getOrder(byUniv, gradeKey) {
 function renderBox() {
   const gradeKey = state.grade;
   const isMedical = state.cat === '메디컬계열';
+  const isMobile = window.innerWidth <= 680;
 
   const rows = RAW.filter(r =>
     state.years.has(r['대입연도']) &&
@@ -563,53 +607,82 @@ function renderBox() {
     hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
   });
 
-  // 1차합격_최종탈락
+  // 1차합격_최종탈락 (미응시는 회색 X로 항상 구분 표시)
   {
-    const sx = [], sy = [], sd = [];
+    const sx = [], sy = [], sd = [], naIdx = [];
     for (const u of univs)
       for (const r of byUniv[u])
-        if (r['상태구분'] === '1차합격_최종탈락') { sx.push(u); sy.push(r[gradeKey]); sd.push(r['모집단위'] || ''); }
-    if (sx.length) traces.push({
-      type: 'box', x: sx, y: sy, name: '1차합격_최종탈락',
-      customdata: sd,
-      marker: { color: COLORS['1차합격_최종탈락'], size: 5 }, line: { color: COLORS['1차합격_최종탈락'] },
-      boxpoints: 'all', jitter: 0.3, pointpos: 0,
-      hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
-    });
+        if (r['상태구분'] === '1차합격_최종탈락') {
+          sx.push(u); sy.push(r[gradeKey]);
+          sd.push([r['모집단위'] || '', r['is_nonattend'] ? ' ⚠미응시' : '']);
+          if (r['is_nonattend']) naIdx.push(sx.length - 1);
+        }
+    if (sx.length) {
+      const trace = {
+        type: 'box', x: sx, y: sy, name: '1차합격_최종탈락',
+        customdata: sd,
+        marker: { color: COLORS['1차합격_최종탈락'], size: 5 },
+        line: { color: COLORS['1차합격_최종탈락'] },
+        boxpoints: 'all', jitter: 0.3, pointpos: 0,
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차합격_최종탈락</extra>',
+      };
+      if (naIdx.length) {
+        trace.selectedpoints = naIdx;
+        trace.selected   = { marker: { color: '#bbb', size: 7, opacity: 0.55, symbol: 'x' } };
+        trace.unselected = { marker: { color: COLORS['1차합격_최종탈락'], size: 5, opacity: 1 } };
+        traces.push(trace);
+        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+          name: '└ 미응시(참고제외)', showlegend: true,
+          marker: { color: '#bbb', size: 9, symbol: 'x', opacity: 0.7 } });
+      } else {
+        traces.push(trace);
+      }
+    }
   }
 
-  // 최종합격: 단일 트레이스 유지, 추가합격 ON 시 colorscale로 점 색만 변경
-  // (marker.color 숫자배열 + colorscale → box 통계/폭 완전 불변)
+  // 최종합격: 추가합격 점은 주황색으로 구분
+  // PC: trace에 selectedpoints 직접 적용 (정상 동작)
+  // 모바일: Plotly.react 이후 requestAnimationFrame으로 restyle 재적용 (초기 렌더 타이밍 우회)
+  let _addIdx = null, _finalBoxIdx = -1;
   {
-    const sx = [], sy = [], sd = [], sc = [];
+    const sx = [], sy = [], sd = [], addIdx = [];
     for (const u of univs)
       for (const r of byUniv[u])
         if (r['상태구분'] === '최종합격') {
           const isAdd = !!r['is_additional'];
           sx.push(u); sy.push(r[gradeKey]);
           sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격']);
-          sc.push(isAdd ? 1 : 0);
+          if (isAdd) addIdx.push(sx.length - 1);
         }
     if (sx.length) {
-      const mkr = state.showAdditional
-        ? { color: sc, colorscale: [[0, FIRST_COLOR], [1, ADD_COLOR]],
-            cmin: 0, cmax: 1, showscale: false, size: 5 }
-        : { color: COLORS['최종합격'], size: 5 };
-      traces.push({
+      const trace = {
         type: 'box', x: sx, y: sy, name: '최종합격',
-        customdata: sd, marker: mkr, line: { color: COLORS['최종합격'] },
+        customdata: sd,
+        marker: { color: COLORS['최종합격'], size: 5 },
+        line: { color: COLORS['최종합격'] },
         boxpoints: 'all', jitter: 0.3, pointpos: 0,
         hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
-      });
-      // 추가합격 ON 시 범례용 더미 scatter
-      if (state.showAdditional) {
+      };
+      if (state.showAdditional && addIdx.length) {
+        if (!isMobile) {
+          // PC: trace에 직접 포함
+          trace.selectedpoints = addIdx;
+          trace.selected   = { marker: { color: ADD_COLOR,   size: 7,  opacity: 1   } };
+          trace.unselected = { marker: { color: FIRST_COLOR, size: 5,  opacity: 0.8 } };
+        } else {
+          // 모바일: Plotly.react 이후 restyle로 강제 적용
+          _finalBoxIdx = traces.length;
+          _addIdx = addIdx.slice();
+        }
+      }
+      traces.push(trace);
+      if (state.showAdditional && addIdx.length) {
         traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
           name: '└ 최초합격', showlegend: true,
-          marker: { color: FIRST_COLOR, size: 8 } });
-        if (sc.some(v => v === 1))
-          traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
-            name: '└ 추가합격', showlegend: true,
-            marker: { color: ADD_COLOR, size: 8 } });
+          marker: { color: FIRST_COLOR, size: 8, opacity: 0.8 } });
+        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+          name: '└ 추가합격', showlegend: true,
+          marker: { color: ADD_COLOR, size: 8 } });
       }
     }
   }
@@ -635,7 +708,6 @@ function renderBox() {
   const typeLabel = state.filter === '전체' ? '' : ` · ${state.filter}`;
   const gradeLabel = gradeKey === '국영수과 등평' ? '국영수과' : '전교과';
 
-  const isMobile = window.innerWidth <= 680;
   // 모바일: 화면 너비에 맞춰 초기 표시, 핀치줌으로 확대/축소
   const chartW = isMobile ? Math.max(window.innerWidth - 16, univs.length * 36 + 160) : undefined;
   const chartH = isMobile ? 440 : 620;
@@ -650,8 +722,11 @@ function renderBox() {
     },
     yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: true },
     dragmode: isMobile ? 'pan' : 'zoom',
+    clickmode: 'event',
     boxmode: 'group',
-    legend: { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
+    legend: isMobile
+      ? { orientation: 'h', y: 1.08, x: 0, xanchor: 'left' }
+      : { orientation: 'h', y: 1.08, x: 1, xanchor: 'right' },
     height: chartH, width: chartW,
     margin: { b: 170, t: 60, r: isMobile ? 8 : 80, l: isMobile ? 38 : 60 },
     plot_bgcolor: '#fafbff',
@@ -662,6 +737,24 @@ function renderBox() {
     displayModeBar: isMobile ? true : 'hover',
     modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toImage'],
   });
+
+  // 모바일: Plotly 렌더 완료 후 다음 프레임에서 selectedpoints 강제 재적용
+  // (모바일 브라우저에서 초기 렌더 시 selected.marker.color 미적용 문제 우회)
+  if (isMobile && state.showAdditional && _addIdx && _addIdx.length && _finalBoxIdx >= 0) {
+    const capturedIdx = _finalBoxIdx;
+    const capturedAddIdx = _addIdx;
+    requestAnimationFrame(() => {
+      Plotly.restyle('chart', {
+        selectedpoints: [capturedAddIdx],
+        'selected.marker.color': [ADD_COLOR],
+        'selected.marker.size': [8],
+        'selected.marker.opacity': [1],
+        'unselected.marker.color': [FIRST_COLOR],
+        'unselected.marker.size': [5],
+        'unselected.marker.opacity': [0.8],
+      }, [capturedIdx]);
+    });
+  }
 
   // 합격권 요약
   updateSummary(byUniv, univs, gradeKey);
@@ -738,7 +831,9 @@ function switchModalTab(tab, btn) {
   drillTab = tab;
   document.querySelectorAll('.modal-tab').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  tab === 'year' ? renderModalYear() : renderModalDept();
+  if (tab === 'year') renderModalYear();
+  else if (tab === 'dept') renderModalDept();
+  else renderModalType();
 }
 
 function modalShapes() {
@@ -772,47 +867,70 @@ function buildBoxTraces(rows, xKey, order) {
     hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
   });
 
-  // 1차합격_최종탈락
-  const r2x = [], r2y = [], r2d = [];
-  for (const r of rows)
-    if (r['상태구분'] === '1차합격_최종탈락') { r2x.push(r[xKey]); r2y.push(r[state.grade]); r2d.push(r['모집단위'] || ''); }
-  if (r2x.length) traces.push({
-    type: 'box', x: r2x, y: r2y, name: '1차합격_최종탈락',
-    customdata: r2d,
-    marker: { color: COLORS['1차합격_최종탈락'], size: 5 }, line: { color: COLORS['1차합격_최종탈락'] },
-    boxpoints: 'all', jitter: 0.35, pointpos: 0,
-    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
-  });
-
-  // 최종합격: 단일 트레이스 유지, 추가합격 ON 시 colorscale로 점 색만 변경
+  // 1차합격_최종탈락 (미응시는 회색 X로 항상 구분 표시)
   {
-    const sx = [], sy = [], sd = [], sc = [];
+    const sx = [], sy = [], sd = [], naIdx = [];
+    for (const r of rows)
+      if (r['상태구분'] === '1차합격_최종탈락') {
+        sx.push(r[xKey]); sy.push(r[state.grade]);
+        sd.push([r['모집단위'] || '', r['is_nonattend'] ? ' ⚠미응시' : '']);
+        if (r['is_nonattend']) naIdx.push(sx.length - 1);
+      }
+    if (sx.length) {
+      const trace = {
+        type: 'box', x: sx, y: sy, name: '1차합격_최종탈락',
+        customdata: sd,
+        marker: { color: COLORS['1차합격_최종탈락'], size: 5 },
+        line: { color: COLORS['1차합격_최종탈락'] },
+        boxpoints: 'all', jitter: 0.35, pointpos: 0,
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차합격_최종탈락</extra>',
+      };
+      if (naIdx.length) {
+        trace.selectedpoints = naIdx;
+        trace.selected   = { marker: { color: '#bbb', size: 7, opacity: 0.55, symbol: 'x' } };
+        trace.unselected = { marker: { color: COLORS['1차합격_최종탈락'], size: 5, opacity: 1 } };
+        traces.push(trace);
+        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+          name: '└ 미응시(참고제외)', showlegend: true,
+          marker: { color: '#bbb', size: 9, symbol: 'x', opacity: 0.7 } });
+      } else {
+        traces.push(trace);
+      }
+    }
+  }
+
+  // 최종합격: selectedpoints로 추가합격 점만 주황색 (박스 통계/폭 불변)
+  {
+    const sx = [], sy = [], sd = [], addIdx = [];
     for (const r of rows)
       if (r['상태구분'] === '최종합격') {
         const isAdd = !!r['is_additional'];
         sx.push(r[xKey]); sy.push(r[state.grade]);
         sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격']);
-        sc.push(isAdd ? 1 : 0);
+        if (isAdd) addIdx.push(sx.length - 1);
       }
     if (sx.length) {
-      const mkr = state.showAdditional
-        ? { color: sc, colorscale: [[0, FIRST_COLOR], [1, ADD_COLOR]],
-            cmin: 0, cmax: 1, showscale: false, size: 5 }
-        : { color: COLORS['최종합격'], size: 5 };
-      traces.push({
+      const trace = {
         type: 'box', x: sx, y: sy, name: '최종합격',
-        customdata: sd, marker: mkr, line: { color: COLORS['최종합격'] },
+        customdata: sd,
+        marker: { color: COLORS['최종합격'], size: 5 },
+        line: { color: COLORS['최종합격'] },
         boxpoints: 'all', jitter: 0.35, pointpos: 0,
         hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
-      });
-      if (state.showAdditional) {
+      };
+      if (state.showAdditional && addIdx.length) {
+        trace.selectedpoints = addIdx;
+        trace.selected   = { marker: { color: ADD_COLOR,   size: 7,  opacity: 1   } };
+        trace.unselected = { marker: { color: FIRST_COLOR, size: 5,  opacity: 0.8 } };
+      }
+      traces.push(trace);
+      if (state.showAdditional && addIdx.length) {
         traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
           name: '└ 최초합격', showlegend: true,
-          marker: { color: FIRST_COLOR, size: 8 } });
-        if (sc.some(v => v === 1))
-          traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
-            name: '└ 추가합격', showlegend: true,
-            marker: { color: ADD_COLOR, size: 8 } });
+          marker: { color: FIRST_COLOR, size: 8, opacity: 0.8 } });
+        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
+          name: '└ 추가합격', showlegend: true,
+          marker: { color: ADD_COLOR, size: 8 } });
       }
     }
   }
@@ -882,6 +1000,51 @@ function renderModalDept() {
     title: { text: `${yearLabel}년 선택`, font: { size: 12, color: '#aaa' } },
     xaxis: { title: '모집단위(학과)', categoryorder: 'array',
              categoryarray: deptOrder, tickangle: -35 },
+    yaxis: { title: gradeKey, range: [9.2, 0.8] },
+    boxmode: 'group',
+    legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
+    height: 440, margin: { b: 130, t: 30, r: 90 },
+    plot_bgcolor: '#fafbff', shapes, annotations,
+  }, { responsive: true });
+}
+
+// 전형별 뷰 (admission_type 필터 무시, 모든 전형명칭 비교)
+function renderModalType() {
+  const gradeKey = state.grade;
+  const isMedical = state.cat === '메디컬계열';
+  const rows = RAW.filter(r =>
+    r['대학교명'] === drillUniv &&
+    state.years.has(r['대입연도']) &&
+    state.gradeYears.has(r['학년']) &&
+    r['is_medical'] === isMedical &&
+    r[gradeKey] != null &&
+    r['전형명칭']
+  );
+
+  if (!rows.length) {
+    Plotly.react('modal-chart', [], { height: 200 }, { responsive: true });
+    return;
+  }
+
+  const byType = {};
+  for (const r of rows) (byType[r['전형명칭']] ??= []).push(r);
+  const typeOrder = Object.entries(byType)
+    .map(([t, rs]) => {
+      const g  = rs.filter(r => r['상태구분'] === '최종합격').map(r => r[gradeKey]);
+      const g2 = rs.filter(r => r['상태구분'] === '1차합격_최종탈락').map(r => r[gradeKey]);
+      return { t, med: g.length ? median(g) : (g2.length ? median(g2) : 99) };
+    })
+    .sort((a, b) => a.med - b.med)
+    .map(x => x.t);
+
+  const traces = buildBoxTraces(rows, '전형명칭', typeOrder);
+  const { shapes, annotations } = modalShapes();
+  const yearLabel = [...state.years].sort().join(', ');
+
+  Plotly.react('modal-chart', traces, {
+    title: { text: `${yearLabel}년 선택`, font: { size: 12, color: '#aaa' } },
+    xaxis: { title: '전형명칭', categoryorder: 'array',
+             categoryarray: typeOrder, tickangle: -35 },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
     boxmode: 'group',
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
