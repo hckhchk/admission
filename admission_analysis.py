@@ -80,6 +80,8 @@ def prepare_data(file_path):
         '예비번호':      ['예비번호\n(있는경우)', '예비번호', '예비 번호'],
         '추가합격상세':  ['추가합격'],
         '등록여부':      ['등록'],
+        '학번':          ['학번'],
+        '이름':          ['이름', '성명'],
     }
 
     col_map = {}
@@ -204,7 +206,13 @@ def prepare_data(file_path):
     else:
         df['enroll_info'] = ''
 
-    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type', 'is_suneung_fail', 'wait_num', 'add_info', 'enroll_info']
+    for col in ('학번', '이름'):
+        if col not in df.columns:
+            df[col] = ''
+        else:
+            df[col] = df[col].apply(lambda x: '' if str(x).strip().lower() in ('nan', 'none') else str(x).strip())
+
+    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type', 'is_suneung_fail', 'wait_num', 'add_info', 'enroll_info', '학번', '이름']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -416,6 +424,19 @@ if (FIREBASE_ENABLED) {
   .modal-add-toggle input:checked + .modal-add-slider { background: #e67e22; }
   .modal-add-toggle input:checked + .modal-add-slider::after { left: 16px; }
   #modal-chart { width: 100%; }
+  #modal-student { font-family: 'Segoe UI', sans-serif; }
+  .stu-header { display:flex; gap:16px; align-items:center; flex-wrap:wrap;
+    padding:10px 14px; background:#f0f4fa; border-radius:8px; margin-bottom:12px; }
+  .stu-header b { font-size:15px; color:#1A2A4A; }
+  .stu-header span { font-size:13px; color:#555; }
+  .stu-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .stu-table th { text-align:left; padding:7px 10px; color:#1A2A4A;
+    border-bottom:2px solid #d0dae8; font-size:12px; white-space:nowrap; }
+  .stu-table td { padding:7px 10px; border-bottom:1px solid #eef2f7; vertical-align:middle; }
+  .stu-table tr:last-child td { border-bottom:none; }
+  .stu-table tr:nth-child(even) td { background:#f8fafc; }
+  .stu-badge { display:inline-block; padding:2px 9px; border-radius:12px;
+    font-size:11px; font-weight:700; color:white; white-space:nowrap; }
 
   #grade-summary { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 12px; }
   .summary-group { background: white; border-radius: 10px; padding: 12px 16px;
@@ -633,6 +654,7 @@ if (FIREBASE_ENABLED) {
       <button class="modal-tab on" onclick="switchModalTab('year', this)">연도별</button>
       <button class="modal-tab"    onclick="switchModalTab('dept', this)">학과별</button>
       <button class="modal-tab"    onclick="switchModalTab('type', this)">전형별</button>
+      <button class="modal-tab" id="modal-tab-student" onclick="switchModalTab('student', this)" style="display:none">학생별</button>
       <label class="modal-add-toggle" title="추가합격 구분 표시 (메인 차트와 연동)">
         <input type="checkbox" id="modal-toggle-add" onchange="syncAdditional(this.checked)">
         <span class="modal-add-slider"></span>
@@ -640,6 +662,7 @@ if (FIREBASE_ENABLED) {
       </label>
     </div>
     <div id="modal-chart"></div>
+    <div id="modal-student" style="display:none;max-height:430px;overflow-y:auto"></div>
   </div>
 </div>
 
@@ -880,7 +903,7 @@ async function renderBox() {
   const rejX = [], rejY = [], rejD = [];
   for (const u of univs)
     for (const r of byUniv[u])
-      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); rejD.push([r['모집단위'] || '', extraInfo(r)]); }
+      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); rejD.push([r['모집단위'] || '', extraInfo(r), r['학번'] || '', r['대입연도']]); }
   if (rejX.length) traces.push({
     type: 'box', x: rejX, y: rejY, name: '1차탈락 (참고)',
     customdata: rejD,
@@ -898,9 +921,9 @@ async function renderBox() {
       for (const r of byUniv[u])
         if (r['상태구분'] === '1차합격_최종탈락') {
           if (r['is_nonattend']) {
-            nax.push(u); nay.push(r[gradeKey]); nad.push([r['모집단위'] || '', extraInfo(r)]);
+            nax.push(u); nay.push(r[gradeKey]); nad.push([r['모집단위'] || '', extraInfo(r), r['학번'] || '', r['대입연도']]);
           } else {
-            sx.push(u); sy.push(r[gradeKey]); sd.push([r['모집단위'] || '', extraInfo(r)]);
+            sx.push(u); sy.push(r[gradeKey]); sd.push([r['모집단위'] || '', extraInfo(r), r['학번'] || '', r['대입연도']]);
           }
         }
     if (sx.length) {
@@ -935,7 +958,7 @@ async function renderBox() {
         if (r['상태구분'] === '최종합격') {
           const isAdd = !!r['is_additional'];
           sx.push(u); sy.push(r[gradeKey]);
-          sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격', extraInfo(r)]);
+          sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격', extraInfo(r), r['학번'] || '', r['대입연도']]);
           if (isAdd) addIdx.push(sx.length - 1);
         }
     if (sx.length) {
@@ -1123,31 +1146,123 @@ let _modalZoomX = null;
 // ── 드릴다운 모달 ───────────────────────────────────────
 let drillUniv = null;
 let drillTab = 'year';
+let drillStudent = null;  // { hakbun, year }
 
-function openDrilldown(univ) {
+function openDrilldown(univ, student = null) {
   drillUniv = univ;
-  drillTab = 'year';
+  drillStudent = student;
+  drillTab = student ? 'student' : 'year';
   // 새 대학 열 때 모달 줌 초기화
   _modalZoomY = [9.2, 0.8];
   _modalZoomX = null;
+
+  // 학생별 탭 버튼 표시/숨김
+  const stuBtn = document.getElementById('modal-tab-student');
+  stuBtn.style.display = student ? '' : 'none';
+
   // 탭 버튼 초기화
-  document.querySelectorAll('.modal-tab').forEach((b, i) => b.classList.toggle('on', i === 0));
+  document.querySelectorAll('.modal-tab').forEach(b => b.classList.remove('on'));
+  if (student) stuBtn.classList.add('on');
+  else document.querySelector('.modal-tab').classList.add('on');
+
   const gradeLabel = state.grade === '국영수과 등평' ? '국영수과' : '전교과';
   const typeLabel  = state.filter === '전체' ? '전체 전형' : state.filter;
   document.getElementById('modal-title').textContent = univ;
-  document.getElementById('modal-sub').textContent   = `${typeLabel} · ${gradeLabel} 기준`;
+  document.getElementById('modal-sub').textContent   = student
+    ? `학생 지원 현황 (${student.year}년도)`
+    : `${typeLabel} · ${gradeLabel} 기준`;
   document.getElementById('modal-toggle-add').checked = state.showAdditional;
   document.getElementById('modal-overlay').classList.add('open');
-  renderModalYear();
+
+  // 패널 전환
+  document.getElementById('modal-chart').style.display   = student ? 'none' : '';
+  document.getElementById('modal-student').style.display = student ? '' : 'none';
+
+  if (student) renderModalStudent();
+  else renderModalYear();
 }
 
 function switchModalTab(tab, btn) {
   drillTab = tab;
   document.querySelectorAll('.modal-tab').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
+  const isStudent = tab === 'student';
+  document.getElementById('modal-chart').style.display   = isStudent ? 'none' : '';
+  document.getElementById('modal-student').style.display = isStudent ? '' : 'none';
   if (tab === 'year') renderModalYear();
   else if (tab === 'dept') renderModalDept();
-  else renderModalType();
+  else if (tab === 'type') renderModalType();
+  else if (tab === 'student') renderModalStudent();
+}
+
+function renderModalStudent() {
+  const el = document.getElementById('modal-student');
+  if (!drillStudent) { el.innerHTML = ''; return; }
+  const { hakbun, year } = drillStudent;
+  const rows = RAW.filter(r => r['학번'] === hakbun && r['대입연도'] === year);
+  if (!rows.length) {
+    el.innerHTML = '<p style="text-align:center;color:#aaa;padding:40px">데이터가 없습니다</p>';
+    return;
+  }
+
+  const statusOrder = { '최종합격': 0, '1차합격_최종탈락': 1, '1차탈락': 2 };
+  rows.sort((a, b) => (statusOrder[a['상태구분']] ?? 3) - (statusOrder[b['상태구분']] ?? 3));
+
+  const gradeKey = state.grade;
+  const grade = rows[0][gradeKey];
+  const name  = rows[0]['이름'] || '';
+  const haknyeon = rows[0]['학년'] || '';
+
+  const badgeStyle = {
+    '최종합격':          'background:#0c4da2',
+    '추가합격':          'background:#e67e22',
+    '1차합격_최종탈락':  'background:#5a9fd4',
+    '1차탈락':           'background:#aaaaaa',
+    '미응시':            'background:#cccccc',
+  };
+
+  let rows_html = '';
+  rows.forEach((r, i) => {
+    const status = r['상태구분'];
+    let badge = status;
+    if (status === '최종합격' && r['is_additional']) badge = '추가합격';
+    if (r['is_nonattend']) badge = '미응시';
+    const bstyle = badgeStyle[badge] || 'background:#aaa';
+
+    const notes = [];
+    if (r['is_suneung_fail']) notes.push('⚠ 수능최저 미충족');
+    if (r['wait_num'])        notes.push(`예비 ${r['wait_num']}번`);
+    if (r['add_info'] && r['add_info'] !== '추가 합격' && r['add_info'] !== '추가합격')
+      notes.push(r['add_info']);
+    if (r['enroll_info'])     notes.push(r['enroll_info']);
+
+    rows_html += `<tr>
+      <td style="padding:7px 10px;font-weight:600">${r['대학교명'] || '-'}</td>
+      <td style="padding:7px 10px;color:#444">${r['모집단위'] || '-'}</td>
+      <td style="padding:7px 10px;color:#666;font-size:12px">${r['전형명칭'] || '-'}</td>
+      <td style="padding:7px 10px;text-align:center">
+        <span class="stu-badge" style="${bstyle}">${badge}</span>
+      </td>
+      <td style="padding:7px 10px;color:#888;font-size:12px">${notes.join(' · ') || ''}</td>
+    </tr>`;
+  });
+
+  el.innerHTML = `
+    <div style="padding:14px 16px 8px">
+      <div class="stu-header">
+        ${name ? `<b>${name}</b>` : ''}
+        <span>${haknyeon ? haknyeon + '학년 · ' : ''}${year}년도 입시</span>
+        <span>${gradeKey}: <b>${grade != null ? Number(grade).toFixed(2) : '-'}</b></span>
+        <span style="color:#999">총 ${rows.length}개교 지원</span>
+      </div>
+      <table class="stu-table">
+        <thead><tr>
+          <th>대학교</th><th>모집단위</th><th>전형</th>
+          <th style="text-align:center">결과</th><th>비고</th>
+        </tr></thead>
+        <tbody>${rows_html}</tbody>
+      </table>
+    </div>`;
 }
 
 function modalShapes() {
@@ -1171,7 +1286,7 @@ function buildBoxTraces(rows, xKey, order) {
   // 1차탈락
   const r1x = [], r1y = [], r1d = [];
   for (const r of rows)
-    if (r['상태구분'] === '1차탈락') { r1x.push(r[xKey]); r1y.push(r[state.grade]); r1d.push([r['모집단위'] || '', extraInfo(r)]); }
+    if (r['상태구분'] === '1차탈락') { r1x.push(r[xKey]); r1y.push(r[state.grade]); r1d.push([r['모집단위'] || '', extraInfo(r), r['학번'] || '', r['대입연도']]); }
   if (r1x.length) traces.push({
     type: 'box', x: r1x, y: r1y, name: '1차탈락 (참고)',
     customdata: r1d,
@@ -1188,9 +1303,9 @@ function buildBoxTraces(rows, xKey, order) {
     for (const r of rows)
       if (r['상태구분'] === '1차합격_최종탈락') {
         if (r['is_nonattend']) {
-          nax.push(r[xKey]); nay.push(r[state.grade]); nad.push([r['모집단위'] || '', extraInfo(r)]);
+          nax.push(r[xKey]); nay.push(r[state.grade]); nad.push([r['모집단위'] || '', extraInfo(r), r['학번'] || '', r['대입연도']]);
         } else {
-          sx.push(r[xKey]); sy.push(r[state.grade]); sd.push([r['모집단위'] || '', extraInfo(r)]);
+          sx.push(r[xKey]); sy.push(r[state.grade]); sd.push([r['모집단위'] || '', extraInfo(r), r['학번'] || '', r['대입연도']]);
         }
       }
     if (sx.length) {
@@ -1221,7 +1336,7 @@ function buildBoxTraces(rows, xKey, order) {
       if (r['상태구분'] === '최종합격') {
         const isAdd = !!r['is_additional'];
         sx.push(r[xKey]); sy.push(r[state.grade]);
-        sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격', extraInfo(r)]);
+        sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격', extraInfo(r), r['학번'] || '', r['대입연도']]);
         if (isAdd) addIdx.push(sx.length - 1);
       }
     if (sx.length) {
@@ -1433,7 +1548,13 @@ document.getElementById('chart').on('plotly_click', data => {
   if (!data || !data.points || !data.points.length) return;
   const pt = data.points[0];
   const univ = pt.x || (pt.data && pt.data.x && pt.data.x[pt.pointIndex]);
-  if (univ) openDrilldown(univ);
+  if (!univ) return;
+  // customdata 마지막 두 값: 학번, 대입연도
+  const cd = pt.customdata;
+  const hakbun = Array.isArray(cd) ? cd[cd.length - 2] : null;
+  const year   = Array.isArray(cd) ? cd[cd.length - 1] : null;
+  const student = (hakbun && year) ? { hakbun, year } : null;
+  openDrilldown(univ, student);
 });
 document.getElementById('chart').on('plotly_relayout', ev => {
   // 사용자가 직접 줌/패닝한 범위를 저장 (재렌더 시 복원용)
