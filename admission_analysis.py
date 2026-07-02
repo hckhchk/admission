@@ -76,6 +76,10 @@ def prepare_data(file_path):
         '전형명칭':      ['전형명칭', '전형명'],
         '전형유형':      ['전형\n유형', '전형유형', '유형'],
         '최초합격':      ['최초합격'],
+        '수능최저충족':  ['수능 최저 충족', '수능최저충족', '수능 최저충족'],
+        '예비번호':      ['예비번호\n(있는경우)', '예비번호', '예비 번호'],
+        '추가합격상세':  ['추가합격'],
+        '등록여부':      ['등록'],
     }
 
     col_map = {}
@@ -165,7 +169,42 @@ def prepare_data(file_path):
         df['is_additional'] = False
         df['is_nonattend'] = False
 
-    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type']
+    # 수능 최저 충족 여부 (미충족 = True)
+    if '수능최저충족' in df.columns:
+        df['is_suneung_fail'] = df['수능최저충족'].astype(str).str.strip() == '미충족'
+    else:
+        df['is_suneung_fail'] = False
+
+    # 예비번호 (없으면 빈 문자열)
+    def fmt_wait_num(x):
+        try:
+            v = str(x).strip()
+            if v.lower() in ('', 'nan', 'none'):
+                return ''
+            return str(int(float(v)))
+        except Exception:
+            v = str(x).strip()
+            return '' if v.lower() in ('nan', 'none') else v
+    if '예비번호' in df.columns:
+        df['wait_num'] = df['예비번호'].apply(fmt_wait_num)
+    else:
+        df['wait_num'] = ''
+
+    def fmt_str_col(x):
+        v = str(x).strip()
+        return '' if v.lower() in ('nan', 'none', '') else v
+
+    if '추가합격상세' in df.columns:
+        df['add_info'] = df['추가합격상세'].apply(fmt_str_col)
+    else:
+        df['add_info'] = ''
+
+    if '등록여부' in df.columns:
+        df['enroll_info'] = df['등록여부'].apply(fmt_str_col)
+    else:
+        df['enroll_info'] = ''
+
+    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type', 'is_suneung_fail', 'wait_num', 'add_info', 'enroll_info']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -614,6 +653,15 @@ const COLORS = {
   '1차탈락':         '#cccccc',
 };
 
+function extraInfo(r) {
+  let s = '';
+  if (r['is_suneung_fail']) s += '<br>⚠ 수능최저 미충족';
+  if (r['wait_num'])    s += '<br>예비 ' + r['wait_num'] + '번';
+  if (r['add_info'])    s += '<br>추가합격: ' + r['add_info'];
+  if (r['enroll_info']) s += '<br>등록: ' + r['enroll_info'];
+  return s;
+}
+
 // ── state ──────────────────────────────────────────────
 const state = {
   years: new Set([2026].filter(y => YEARS.includes(y)).concat(YEARS.includes(2026) ? [] : [YEARS[YEARS.length-1]])),
@@ -832,14 +880,14 @@ async function renderBox() {
   const rejX = [], rejY = [], rejD = [];
   for (const u of univs)
     for (const r of byUniv[u])
-      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); rejD.push(r['모집단위'] || ''); }
+      if (r['상태구분'] === '1차탈락') { rejX.push(u); rejY.push(r[gradeKey]); rejD.push([r['모집단위'] || '', extraInfo(r)]); }
   if (rejX.length) traces.push({
     type: 'box', x: rejX, y: rejY, name: '1차탈락 (참고)',
     customdata: rejD,
     marker: { color: COLORS['1차탈락'], opacity: 0.45, size: 4 },
     line: { color: COLORS['1차탈락'] }, fillcolor: 'rgba(204,204,204,0.15)',
     boxpoints: 'all', jitter: 0.4, pointpos: 0,
-    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
+    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차탈락</extra>',
   });
 
   // 1차합격_최종탈락 (미응시는 별도 scatter X로 표시 — box selectedpoints는 symbol 미지원)
@@ -849,8 +897,11 @@ async function renderBox() {
     for (const u of univs)
       for (const r of byUniv[u])
         if (r['상태구분'] === '1차합격_최종탈락') {
-          sx.push(u); sy.push(r[gradeKey]); sd.push(r['모집단위'] || '');
-          if (r['is_nonattend']) { nax.push(u); nay.push(r[gradeKey]); nad.push(r['모집단위'] || ''); }
+          if (r['is_nonattend']) {
+            nax.push(u); nay.push(r[gradeKey]); nad.push([r['모집단위'] || '', extraInfo(r)]);
+          } else {
+            sx.push(u); sy.push(r[gradeKey]); sd.push([r['모집단위'] || '', extraInfo(r)]);
+          }
         }
     if (sx.length) {
       traces.push({
@@ -859,7 +910,7 @@ async function renderBox() {
         marker: { color: COLORS['1차합격_최종탈락'], size: 5 },
         line: { color: COLORS['1차합격_최종탈락'] },
         boxpoints: 'all', jitter: 0.3, pointpos: 0,
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차합격_최종탈락</extra>',
       });
     }
     if (nax.length) {
@@ -868,7 +919,7 @@ async function renderBox() {
         name: '└ 미응시(참고제외)', customdata: nad,
         marker: { color: '#aaa', size: 9, symbol: 'x-thin', opacity: 0.9,
                   line: { color: '#aaa', width: 2.5 } },
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>미응시(참고제외)</extra>',
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>미응시(참고제외)</extra>',
       });
     }
   }
@@ -884,7 +935,7 @@ async function renderBox() {
         if (r['상태구분'] === '최종합격') {
           const isAdd = !!r['is_additional'];
           sx.push(u); sy.push(r[gradeKey]);
-          sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격']);
+          sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격', extraInfo(r)]);
           if (isAdd) addIdx.push(sx.length - 1);
         }
     if (sx.length) {
@@ -894,7 +945,7 @@ async function renderBox() {
         marker: { color: COLORS['최종합격'], size: 5 },
         line: { color: COLORS['최종합격'] },
         boxpoints: 'all', jitter: 0.3, pointpos: 0,
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}%{customdata[2]}<extra>최종합격</extra>',
       };
       if (state.showAdditional && addIdx.length) {
         if (!isMobile) {
@@ -1120,14 +1171,14 @@ function buildBoxTraces(rows, xKey, order) {
   // 1차탈락
   const r1x = [], r1y = [], r1d = [];
   for (const r of rows)
-    if (r['상태구분'] === '1차탈락') { r1x.push(r[xKey]); r1y.push(r[state.grade]); r1d.push(r['모집단위'] || ''); }
+    if (r['상태구분'] === '1차탈락') { r1x.push(r[xKey]); r1y.push(r[state.grade]); r1d.push([r['모집단위'] || '', extraInfo(r)]); }
   if (r1x.length) traces.push({
     type: 'box', x: r1x, y: r1y, name: '1차탈락 (참고)',
     customdata: r1d,
     marker: { color: COLORS['1차탈락'], opacity: 0.4, size: 5 }, line: { color: COLORS['1차탈락'] },
     fillcolor: 'rgba(204,204,204,0.1)',
     boxpoints: 'all', jitter: 0.35, pointpos: 0,
-    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
+    hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차탈락</extra>',
   });
 
   // 1차합격_최종탈락 (미응시는 별도 scatter X로 표시)
@@ -1136,8 +1187,11 @@ function buildBoxTraces(rows, xKey, order) {
     const nax = [], nay = [], nad = [];
     for (const r of rows)
       if (r['상태구분'] === '1차합격_최종탈락') {
-        sx.push(r[xKey]); sy.push(r[state.grade]); sd.push(r['모집단위'] || '');
-        if (r['is_nonattend']) { nax.push(r[xKey]); nay.push(r[state.grade]); nad.push(r['모집단위'] || ''); }
+        if (r['is_nonattend']) {
+          nax.push(r[xKey]); nay.push(r[state.grade]); nad.push([r['모집단위'] || '', extraInfo(r)]);
+        } else {
+          sx.push(r[xKey]); sy.push(r[state.grade]); sd.push([r['모집단위'] || '', extraInfo(r)]);
+        }
       }
     if (sx.length) {
       traces.push({
@@ -1146,7 +1200,7 @@ function buildBoxTraces(rows, xKey, order) {
         marker: { color: COLORS['1차합격_최종탈락'], size: 5 },
         line: { color: COLORS['1차합격_최종탈락'] },
         boxpoints: 'all', jitter: 0.35, pointpos: 0,
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차합격_최종탈락</extra>',
       });
     }
     if (nax.length) {
@@ -1155,7 +1209,7 @@ function buildBoxTraces(rows, xKey, order) {
         name: '└ 미응시(참고제외)', customdata: nad,
         marker: { color: '#aaa', size: 9, symbol: 'x-thin', opacity: 0.9,
                   line: { color: '#aaa', width: 2.5 } },
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>미응시(참고제외)</extra>',
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>미응시(참고제외)</extra>',
       });
     }
   }
@@ -1167,7 +1221,7 @@ function buildBoxTraces(rows, xKey, order) {
       if (r['상태구분'] === '최종합격') {
         const isAdd = !!r['is_additional'];
         sx.push(r[xKey]); sy.push(r[state.grade]);
-        sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격']);
+        sd.push([r['모집단위'] || '', isAdd ? '추가합격' : '최초합격', extraInfo(r)]);
         if (isAdd) addIdx.push(sx.length - 1);
       }
     if (sx.length) {
@@ -1177,7 +1231,7 @@ function buildBoxTraces(rows, xKey, order) {
         marker: { color: COLORS['최종합격'], size: 5 },
         line: { color: COLORS['최종합격'] },
         boxpoints: 'all', jitter: 0.35, pointpos: 0,
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}<extra>최종합격</extra>',
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}<br>구분: %{customdata[1]}%{customdata[2]}<extra>최종합격</extra>',
       };
       if (state.showAdditional && addIdx.length) {
         trace.selectedpoints = addIdx;
