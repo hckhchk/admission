@@ -12,6 +12,7 @@ import pandas as pd
 #
 # 인증 기능을 끄려면: FIREBASE_ENABLED = False
 FIREBASE_ENABLED = True  # True로 바꾸면 로그인 필요
+FIREBASE_DATA    = True  # True: 학생 데이터를 Firestore에서 로드 (보안 강화; False: HTML에 삽입)
 FIREBASE_CONFIG = {
     "apiKey":            "AIzaSyByw30PVfcnckhaP9F8cyAU5RkefQpheaM",
     "authDomain":        "hansung-admission.firebaseapp.com",
@@ -237,6 +238,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <script type="module" id="firebase-init-module">
 const FIREBASE_ENABLED = __FIREBASE_ENABLED__;
 const FIREBASE_CONFIG  = __FIREBASE_CONFIG__;
+const FIREBASE_DATA    = __FIREBASE_DATA__;
 
 if (FIREBASE_ENABLED) {
   const { initializeApp }                      = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
@@ -302,10 +304,31 @@ if (FIREBASE_ENABLED) {
       await signOut(auth);
       return;
     }
-    overlay.style.display     = 'none';
-    mainPage.style.display    = '';
-    authStatus.style.display  = 'flex';
-    authEmail.textContent     = user.email;
+    overlay.style.display    = 'none';
+    authStatus.style.display = 'flex';
+    authEmail.textContent    = user.email;
+    if (FIREBASE_DATA) {
+      const dlEl = document.getElementById('data-loading');
+      dlEl.style.display = 'flex';
+      try {
+        const metaSnap = await getDoc(doc(db, 'admissionData', 'meta'));
+        const fetchedYears = metaSnap.data().years;
+        const yearSnaps = await Promise.all(
+          fetchedYears.map(y => getDoc(doc(db, 'admissionData', String(y))))
+        );
+        const allRecords = yearSnaps.flatMap(s => s.data()?.records ?? []);
+        dlEl.style.display  = 'none';
+        mainPage.style.display = '';
+        window.__initWithData(allRecords, fetchedYears);
+      } catch(e) {
+        document.getElementById('data-loading').style.display = 'none';
+        authMsg.textContent = '데이터 로드 실패: ' + e.message;
+        overlay.style.display = 'flex';
+        await signOut(auth);
+      }
+    } else {
+      mainPage.style.display = '';
+    }
   });
 
   loginBtn.addEventListener('click', handleLogin);
@@ -323,6 +346,20 @@ if (FIREBASE_ENABLED) {
   * { box-sizing: border-box; }
   body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; background: #f0f2f5; color: #222; }
   .page { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+
+  /* ── Firestore 데이터 로딩 오버레이 ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #data-loading {
+    display: none; position: fixed; inset: 0; z-index: 9998;
+    background: rgba(240,242,245,0.97);
+    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+  }
+  #data-loading .dl-spinner {
+    width: 44px; height: 44px; border: 4px solid #d0d9e8;
+    border-top-color: #1a2a4a; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  #data-loading p { color: #1a2a4a; font-size: 15px; font-weight: 600; margin: 0; }
 
   /* ── Firebase 로그인 오버레이 ── */
   #auth-overlay {
@@ -549,6 +586,12 @@ if (FIREBASE_ENABLED) {
 </head>
 <body>
 
+<!-- Firestore 데이터 로딩 오버레이 -->
+<div id="data-loading">
+  <div class="dl-spinner"></div>
+  <p>데이터 불러오는 중...</p>
+</div>
+
 <!-- Firebase 로그인 오버레이 -->
 <div id="auth-overlay">
   <div id="auth-box">
@@ -671,8 +714,7 @@ if (FIREBASE_ENABLED) {
 </div>
 
 <script>
-const RAW = __DATA__;
-const YEARS = __YEARS__;
+__RAW_YEARS_DECL__
 
 const COLORS = {
   '최종합격':        '#0c4da2',
@@ -691,7 +733,7 @@ function extraInfo(r) {
 
 // ── state ──────────────────────────────────────────────
 const state = {
-  years: new Set([2026].filter(y => YEARS.includes(y)).concat(YEARS.includes(2026) ? [] : [YEARS[YEARS.length-1]])),
+  years: new Set(YEARS.length ? ([2026].filter(y => YEARS.includes(y)).concat(YEARS.includes(2026) ? [] : [YEARS[YEARS.length-1]])) : []),
   gradeYears: new Set([2, 3]),
   filter: '학생부종합',
   cat: '일반계열',
@@ -728,15 +770,19 @@ const gradeYearRow = document.getElementById('grade-year-row');
 
 // Year buttons (multi-select)
 const yearRow = document.getElementById('year-row');
-YEARS.forEach(y => {
-  const b = makeBtn(y + '년', 'year-btn', state.years.has(y), () => {
-    if (state.years.has(y) && state.years.size === 1) return;
-    state.years.has(y) ? state.years.delete(y) : state.years.add(y);
-    b.classList.toggle('on', state.years.has(y));
-    render();
+function buildYearButtons() {
+  yearRow.innerHTML = '';
+  YEARS.forEach(y => {
+    const b = makeBtn(y + '년', 'year-btn', state.years.has(y), () => {
+      if (state.years.has(y) && state.years.size === 1) return;
+      state.years.has(y) ? state.years.delete(y) : state.years.add(y);
+      b.classList.toggle('on', state.years.has(y));
+      render();
+    });
+    yearRow.appendChild(b);
   });
-  yearRow.appendChild(b);
-});
+}
+buildYearButtons();
 
 // Filter buttons
 const FILTERS = ['전체', '학생부종합', '논술', '특기자전형', '특별전형'];
@@ -1570,6 +1616,16 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 // ── dispatcher ─────────────────────────────────────────
 function render() { renderBox(); }
 
+// Firestore 데이터 모드에서 Firebase 모듈이 데이터 로드 완료 후 호출
+window.__initWithData = function(records, years) {
+  RAW   = records;
+  YEARS = years;
+  const def = YEARS.includes(2026) ? 2026 : YEARS[YEARS.length - 1];
+  state.years = new Set([def].filter(Boolean));
+  buildYearButtons();
+  render();
+};
+
 render();
 
 // plotly_click / plotly_relayout 핸들러는 최초 한 번만 바인딩
@@ -1605,12 +1661,21 @@ document.getElementById('chart').on('plotly_relayout', ev => {
 
 
 def prepare_and_visualize(file_path):
-    records, years = prepare_data(file_path)
-    html = HTML_TEMPLATE \
-        .replace('__DATA__', json.dumps(records, ensure_ascii=False)) \
-        .replace('__YEARS__', json.dumps(years)) \
-        .replace('__FIREBASE_ENABLED__', 'true' if FIREBASE_ENABLED else 'false') \
-        .replace('__FIREBASE_CONFIG__', json.dumps(FIREBASE_CONFIG, ensure_ascii=False))
+    if FIREBASE_DATA:
+        html = HTML_TEMPLATE \
+            .replace('__RAW_YEARS_DECL__', 'let RAW = [];\nlet YEARS = [];') \
+            .replace('__FIREBASE_DATA__', 'true') \
+            .replace('__FIREBASE_ENABLED__', 'true' if FIREBASE_ENABLED else 'false') \
+            .replace('__FIREBASE_CONFIG__', json.dumps(FIREBASE_CONFIG, ensure_ascii=False))
+    else:
+        records, years = prepare_data(file_path)
+        html = HTML_TEMPLATE \
+            .replace('__RAW_YEARS_DECL__', 'const RAW = __DATA__;\nconst YEARS = __YEARS__;') \
+            .replace('__DATA__', json.dumps(records, ensure_ascii=False)) \
+            .replace('__YEARS__', json.dumps(years)) \
+            .replace('__FIREBASE_DATA__', 'false') \
+            .replace('__FIREBASE_ENABLED__', 'true' if FIREBASE_ENABLED else 'false') \
+            .replace('__FIREBASE_CONFIG__', json.dumps(FIREBASE_CONFIG, ensure_ascii=False))
 
     output_path = os.path.splitext(file_path)[0] + '_admission_analysis.html'
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -1627,7 +1692,7 @@ if __name__ == '__main__':
     default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), excel_name)
     excel_path = sys.argv[1] if len(sys.argv) > 1 else default_path
 
-    if not os.path.exists(excel_path):
+    if not FIREBASE_DATA and not os.path.exists(excel_path):
         print(f"파일 없음: {excel_path}")
         sys.exit(1)
 
