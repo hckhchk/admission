@@ -1040,6 +1040,8 @@ document.getElementById('modal-chart').addEventListener('wheel', e => {
 }, { passive: false });
 
 // 모달 줌 save/restore 헬퍼
+let _modalRelayoutBound = false;
+
 async function modalReact(traces, layout) {
   const savedY = _modalZoomY.slice();
   const savedX = _modalZoomX ? _modalZoomX.slice() : null;
@@ -1048,6 +1050,23 @@ async function modalReact(traces, layout) {
     yaxis: { ...layout.yaxis, range: savedY },
     ...(savedX ? { xaxis: { ...layout.xaxis, range: savedX } } : { xaxis: layout.xaxis }),
   }, MODAL_CONFIG);
+  // Plotly.react() 후에야 .on()이 사용 가능 — 최초 1회만 등록
+  if (!_modalRelayoutBound) {
+    _modalRelayoutBound = true;
+    document.getElementById('modal-chart').on('plotly_relayout', ev => {
+      if (ev['yaxis.range[0]'] !== undefined) {
+        _modalZoomY = [ev['yaxis.range[0]'], ev['yaxis.range[1]']];
+      } else if (ev['yaxis.autorange']) {
+        _modalZoomY = [9.2, 0.8];
+      }
+      if (ev['xaxis.range[0]'] !== undefined) {
+        _modalZoomX = [ev['xaxis.range[0]'], ev['xaxis.range[1]']];
+      } else if (ev['xaxis.autorange']) {
+        _modalZoomX = null;
+      }
+    });
+  }
+  // Plotly.react()가 내부에서 plotly_relayout을 발생시켜 덮어쓸 수 있으므로 복원
   _modalZoomY = savedY;
   _modalZoomX = savedX;
 }
@@ -1203,18 +1222,6 @@ document.getElementById('chart').on('plotly_relayout', ev => {
   }
 });
 
-document.getElementById('modal-chart').on('plotly_relayout', ev => {
-  if (ev['yaxis.range[0]'] !== undefined) {
-    _modalZoomY = [ev['yaxis.range[0]'], ev['yaxis.range[1]']];
-  } else if (ev['yaxis.autorange']) {
-    _modalZoomY = [9.2, 0.8];
-  }
-  if (ev['xaxis.range[0]'] !== undefined) {
-    _modalZoomX = [ev['xaxis.range[0]'], ev['xaxis.range[1]']];
-  } else if (ev['xaxis.autorange']) {
-    _modalZoomX = null;
-  }
-});
 </script>
 </body>
 </html>
