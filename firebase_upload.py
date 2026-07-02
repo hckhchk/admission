@@ -101,7 +101,7 @@ def upload(excel_path, key_path):
         db.collection('admissionData').document(str(year)).set({'records': year_records})
         print(f"admissionData/{year} 업로드 완료 → {len(year_records)}건")
 
-    print("\n✅ Firestore 업로드 완료!")
+    print("\nFirestore 업로드 완료!")
     print("이제 admission_analysis.py를 실행해 Firebase HTML을 생성하세요.")
 
 
