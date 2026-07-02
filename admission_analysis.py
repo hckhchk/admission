@@ -11,14 +11,14 @@ import pandas as pd
 # Firebase Console > Authentication > 로그인 방법 > Google 을 사용 설정하세요.
 #
 # 인증 기능을 끄려면: FIREBASE_ENABLED = False
-FIREBASE_ENABLED = False  # True로 바꾸면 로그인 필요
+FIREBASE_ENABLED = True  # True로 바꾸면 로그인 필요
 FIREBASE_CONFIG = {
-    "apiKey":            "여기에-apiKey-입력",
-    "authDomain":        "your-project.firebaseapp.com",
-    "projectId":         "your-project-id",
-    "storageBucket":     "your-project.appspot.com",
-    "messagingSenderId": "123456789",
-    "appId":             "1:123456789:web:abcdef123456",
+    "apiKey":            "AIzaSyByw30PVfcnckhaP9F8cyAU5RkefQpheaM",
+    "authDomain":        "hansung-admission.firebaseapp.com",
+    "projectId":         "hansung-admission",
+    "storageBucket":     "hansung-admission.firebasestorage.app",
+    "messagingSenderId": "561483748784",
+    "appId":             "1:561483748784:web:6e29c9d2343d26ed197275",
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -214,11 +214,13 @@ if (FIREBASE_ENABLED) {
     authMsg.textContent = '';
     try {
       const provider = new GoogleAuthProvider();
+      // 이미 로그인된 계정이 있어도 계정 선택 화면을 항상 표시
+      provider.setCustomParameters({ prompt: 'select_account' });
       const result   = await signInWithPopup(auth, provider);
       const email    = result.user.email;
       const allowed  = await checkWhitelist(email);
       if (!allowed) {
-        authMsg.textContent = `접근 권한이 없습니다.\n(${email})`;
+        authMsg.textContent = `❌ 접근 권한이 없는 계정입니다.\n로그인 시도: ${email}\n\n관리자에게 해당 이메일 등록을 요청하세요.`;
         await signOut(auth);
       }
     } catch (e) {
@@ -783,6 +785,16 @@ function renderBox() {
 
   const byUniv = {};
   for (const r of rows) (byUniv[r['대학교명']] ??= []).push(r);
+  if (state.showNoPass) {
+    // 등급 데이터가 없는 대학도 포함 (null 등급 레코드 → 빈 박스로 표시)
+    RAW.filter(r =>
+      state.years.has(r['대입연도']) &&
+      state.gradeYears.has(r['학년']) &&
+      r['is_medical'] === isMedical &&
+      (state.filter === '전체' || r['admission_type'] === state.filter) &&
+      matchesDeptFilter(r['모집단위'])
+    ).forEach(r => { byUniv[r['대학교명']] ??= []; });
+  }
   for (const u of Object.keys(byUniv)) {
     if (!state.showNoPass && !byUniv[u].some(r => r['상태구분'] !== '1차탈락')) delete byUniv[u];
   }
@@ -931,14 +943,13 @@ function renderBox() {
   const chartW = isMobile ? Math.max(window.innerWidth - 16, univs.length * 36 + 160) : undefined;
   const chartH = isMobile ? 440 : 620;
 
-  // 현재 X/Y축 줌 상태 보존 (토글 등 재렌더 시 초기화 방지)
-  const _cel = document.getElementById('chart');
-  const _yRange = (_cel && _cel.layout && _cel.layout.yaxis && _cel.layout.yaxis.range)
-    ? _cel.layout.yaxis.range.slice()
-    : [9.2, 0.8];
-  const _xRange = (_cel && _cel.layout && _cel.layout.xaxis && _cel.layout.xaxis.range)
-    ? _cel.layout.xaxis.range.slice()
-    : undefined;
+  // 줌 상태 복원 (plotly_relayout에서 추적한 값 사용)
+  // x축: 현재 카테고리 범위 안에 있을 때만 복원 (필터 변경 후 범위 이탈 방지)
+  const _yRange = _zoomY;
+  const _xRangeSafe = (_zoomX &&
+    _zoomX[0] >= -0.5 && _zoomX[0] <= univs.length - 0.5 &&
+    _zoomX[1] >= -0.5 && _zoomX[1] <= univs.length - 0.5)
+    ? _zoomX : undefined;
 
   Plotly.react('chart', traces, {
     title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: isMobile ? 12 : 16 } },
@@ -947,10 +958,10 @@ function renderBox() {
       categoryorder: 'array', categoryarray: univs,
       tickangle: -38, tickvals: univs, ticktext: univs.map(u => `${u}(${nFinal[u]}/${nTotal[u]})`),
       fixedrange: false,
-      ...(_xRange ? { range: _xRange } : {}),
+      ...(_xRangeSafe ? { range: _xRangeSafe } : {}),
     },
     yaxis: { title: gradeKey, range: _yRange, fixedrange: false },
-    dragmode: isMobile ? 'pan' : 'zoom',
+    dragmode: 'pan',
     clickmode: 'event',
     boxmode: 'group',
     legend: isMobile
@@ -1038,6 +1049,10 @@ function updateSummary(byUniv, univs, gradeKey) {
     group('📊 합격자 중앙~상위 25% 구간', '#784212', 'chip-reach', reach, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값~상위 25% 등급 사이 구간`) +
     disclaimer;
 }
+
+// ── 차트 줌 상태 (plotly_relayout로 추적, layout에서 직접 읽지 않음) ───────
+let _zoomY = [9.2, 0.8]; // 기본: 역순 (낮은 등급이 위)
+let _zoomX = null;
 
 // ── 드릴다운 모달 ───────────────────────────────────────
 let drillUniv = null;
@@ -1297,12 +1312,25 @@ function render() { renderBox(); }
 
 render();
 
-// plotly_click 핸들러는 최초 한 번만 바인딩
+// plotly_click / plotly_relayout 핸들러는 최초 한 번만 바인딩
 document.getElementById('chart').on('plotly_click', data => {
   if (!data || !data.points || !data.points.length) return;
   const pt = data.points[0];
   const univ = pt.x || (pt.data && pt.data.x && pt.data.x[pt.pointIndex]);
   if (univ) openDrilldown(univ);
+});
+document.getElementById('chart').on('plotly_relayout', ev => {
+  // 사용자가 직접 줌/패닝한 범위를 저장 (재렌더 시 복원용)
+  if (ev['yaxis.range[0]'] !== undefined) {
+    _zoomY = [ev['yaxis.range[0]'], ev['yaxis.range[1]']];
+  } else if (ev['yaxis.autorange']) {
+    _zoomY = [9.2, 0.8];
+  }
+  if (ev['xaxis.range[0]'] !== undefined) {
+    _zoomX = [ev['xaxis.range[0]'], ev['xaxis.range[1]']];
+  } else if (ev['xaxis.autorange']) {
+    _zoomX = null;
+  }
 });
 </script>
 </body>
