@@ -773,7 +773,7 @@ function getOrder(byUniv, gradeKey) {
 }
 
 // ── 분포도 ─────────────────────────────────────────────
-function renderBox() {
+async function renderBox() {
   const gradeKey = state.grade;
   const isMedical = state.cat === '메디컬계열';
   const isMobile = window.innerWidth <= 680;
@@ -953,7 +953,12 @@ function renderBox() {
     _zoomX[1] >= -0.5 && _zoomX[1] <= univs.length - 0.5)
     ? _zoomX : undefined;
 
-  Plotly.react('chart', traces, {
+  // Plotly.react() 내부에서 plotly_relayout이 발생해 _zoomY/_zoomX가 덮어써질 수 있으므로
+  // react 전에 저장하고 완료 후 복원
+  const _savedZoomY = _zoomY.slice();
+  const _savedZoomX = _zoomX ? _zoomX.slice() : null;
+
+  await Plotly.react('chart', traces, {
     title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: isMobile ? 12 : 16 } },
     xaxis: {
       title: { text: '대학명 (최종합격수 / 총지원수)', font: { size: 11 } },
@@ -979,6 +984,10 @@ function renderBox() {
     displayModeBar: isMobile ? true : 'hover',
     modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toImage'],
   });
+
+  // react 완료 후 줌 상태 복원
+  _zoomY = _savedZoomY;
+  _zoomX = _savedZoomX;
 
   // 모바일: Plotly 렌더 완료 후 다음 프레임에서 selectedpoints 강제 재적용
   // (모바일 브라우저에서 초기 렌더 시 selected.marker.color 미적용 문제 우회)
