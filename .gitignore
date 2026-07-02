@@ -1,0 +1,10 @@
+# 생성된 HTML (학생 데이터 포함 가능 — git 추적 제외)
+*_admission_analysis.html
+
+# 민감 파일
+serviceAccountKey.json
+*.xlsx
+
+# Python
+__pycache__/
+*.pyc
