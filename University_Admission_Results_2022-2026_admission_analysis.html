@@ -669,36 +669,34 @@ function renderBox() {
     hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
   });
 
-  // 1차합격_최종탈락 (미응시는 회색 X로 항상 구분 표시)
+  // 1차합격_최종탈락 (미응시는 별도 scatter X로 표시 — box selectedpoints는 symbol 미지원)
   {
-    const sx = [], sy = [], sd = [], naIdx = [];
+    const sx = [], sy = [], sd = [];
+    const nax = [], nay = [], nad = [];
     for (const u of univs)
       for (const r of byUniv[u])
         if (r['상태구분'] === '1차합격_최종탈락') {
-          sx.push(u); sy.push(r[gradeKey]);
-          sd.push([r['모집단위'] || '', r['is_nonattend'] ? ' ⚠미응시' : '']);
-          if (r['is_nonattend']) naIdx.push(sx.length - 1);
+          sx.push(u); sy.push(r[gradeKey]); sd.push(r['모집단위'] || '');
+          if (r['is_nonattend']) { nax.push(u); nay.push(r[gradeKey]); nad.push(r['모집단위'] || ''); }
         }
     if (sx.length) {
-      const trace = {
+      traces.push({
         type: 'box', x: sx, y: sy, name: '1차합격_최종탈락',
         customdata: sd,
         marker: { color: COLORS['1차합격_최종탈락'], size: 5 },
         line: { color: COLORS['1차합격_최종탈락'] },
         boxpoints: 'all', jitter: 0.3, pointpos: 0,
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차합격_최종탈락</extra>',
-      };
-      if (naIdx.length) {
-        trace.selectedpoints = naIdx;
-        trace.selected   = { marker: { color: '#bbb', size: 7, opacity: 0.55, symbol: 'x' } };
-        trace.unselected = { marker: { color: COLORS['1차합격_최종탈락'], size: 5, opacity: 1 } };
-        traces.push(trace);
-        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
-          name: '└ 미응시(참고제외)', showlegend: true,
-          marker: { color: '#bbb', size: 9, symbol: 'x', opacity: 0.7 } });
-      } else {
-        traces.push(trace);
-      }
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
+      });
+    }
+    if (nax.length) {
+      traces.push({
+        type: 'scatter', mode: 'markers', x: nax, y: nay,
+        name: '└ 미응시(참고제외)', customdata: nad,
+        marker: { color: '#aaa', size: 9, symbol: 'x-thin', opacity: 0.9,
+                  line: { color: '#aaa', width: 2.5 } },
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>미응시(참고제외)</extra>',
+      });
     }
   }
 
@@ -943,35 +941,33 @@ function buildBoxTraces(rows, xKey, order) {
     hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차탈락</extra>',
   });
 
-  // 1차합격_최종탈락 (미응시는 회색 X로 항상 구분 표시)
+  // 1차합격_최종탈락 (미응시는 별도 scatter X로 표시)
   {
-    const sx = [], sy = [], sd = [], naIdx = [];
+    const sx = [], sy = [], sd = [];
+    const nax = [], nay = [], nad = [];
     for (const r of rows)
       if (r['상태구분'] === '1차합격_최종탈락') {
-        sx.push(r[xKey]); sy.push(r[state.grade]);
-        sd.push([r['모집단위'] || '', r['is_nonattend'] ? ' ⚠미응시' : '']);
-        if (r['is_nonattend']) naIdx.push(sx.length - 1);
+        sx.push(r[xKey]); sy.push(r[state.grade]); sd.push(r['모집단위'] || '');
+        if (r['is_nonattend']) { nax.push(r[xKey]); nay.push(r[state.grade]); nad.push(r['모집단위'] || ''); }
       }
     if (sx.length) {
-      const trace = {
+      traces.push({
         type: 'box', x: sx, y: sy, name: '1차합격_최종탈락',
         customdata: sd,
         marker: { color: COLORS['1차합격_최종탈락'], size: 5 },
         line: { color: COLORS['1차합격_최종탈락'] },
         boxpoints: 'all', jitter: 0.35, pointpos: 0,
-        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata[0]}%{customdata[1]}<extra>1차합격_최종탈락</extra>',
-      };
-      if (naIdx.length) {
-        trace.selectedpoints = naIdx;
-        trace.selected   = { marker: { color: '#bbb', size: 7, opacity: 0.55, symbol: 'x' } };
-        trace.unselected = { marker: { color: COLORS['1차합격_최종탈락'], size: 5, opacity: 1 } };
-        traces.push(trace);
-        traces.push({ type: 'scatter', x: [null], y: [null], mode: 'markers',
-          name: '└ 미응시(참고제외)', showlegend: true,
-          marker: { color: '#bbb', size: 9, symbol: 'x', opacity: 0.7 } });
-      } else {
-        traces.push(trace);
-      }
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>1차합격_최종탈락</extra>',
+      });
+    }
+    if (nax.length) {
+      traces.push({
+        type: 'scatter', mode: 'markers', x: nax, y: nay,
+        name: '└ 미응시(참고제외)', customdata: nad,
+        marker: { color: '#aaa', size: 9, symbol: 'x-thin', opacity: 0.9,
+                  line: { color: '#aaa', width: 2.5 } },
+        hovertemplate: '%{x}<br>등평: %{y:.2f}<br>학과: %{customdata}<extra>미응시(참고제외)</extra>',
+      });
     }
   }
 
