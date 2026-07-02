@@ -205,7 +205,7 @@ if (FIREBASE_ENABLED) {
   const authEmail  = document.getElementById('auth-email');
 
   async function checkWhitelist(email) {
-    const ref = doc(db, 'whitelist', email.toLowerCase());
+    const ref = doc(db, 'Whitelist', email.toLowerCase());
     const snap = await getDoc(ref);
     return snap.exists();
   }
