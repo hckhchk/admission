@@ -3,6 +3,25 @@ import sys
 import json
 import pandas as pd
 
+# ── Firebase 설정 ─────────────────────────────────────────────────────────────
+# Firebase 콘솔(https://console.firebase.google.com)에서 프로젝트 생성 후
+# 프로젝트 설정 > 일반 > 내 앱 > 웹 앱 추가 에서 아래 값들을 복사해 넣으세요.
+# Firestore 데이터베이스를 생성하고 'whitelist' 컬렉션에 허용할 이메일을
+# 문서 ID로 추가하세요 (예: 문서 ID = "teacher@school.kr", 필드 불필요).
+# Firebase Console > Authentication > 로그인 방법 > Google 을 사용 설정하세요.
+#
+# 인증 기능을 끄려면: FIREBASE_ENABLED = False
+FIREBASE_ENABLED = False  # True로 바꾸면 로그인 필요
+FIREBASE_CONFIG = {
+    "apiKey":            "여기에-apiKey-입력",
+    "authDomain":        "your-project.firebaseapp.com",
+    "projectId":         "your-project-id",
+    "storageBucket":     "your-project.appspot.com",
+    "messagingSenderId": "123456789",
+    "appId":             "1:123456789:web:abcdef123456",
+}
+# ─────────────────────────────────────────────────────────────────────────────
+
 MEDICAL_KEYWORDS = ['의예', '의학', '의과', '치의', '치과', '한의', '약학', '수의예']
 SPECIAL_KEYWORDS = [
     '기초생활', '기회균형', '기회균등', '고른기회', '사회통합', '차상위',
@@ -163,11 +182,125 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="apple-mobile-web-app-title" content="입시 분석">
 <link rel="manifest" href="manifest.json">
 <title>한성과학고등학교 대학교별 내신 등급 입시 결과 분석</title>
+<!-- Firebase SDK (모듈 방식) -->
+<script type="module" id="firebase-init-module">
+const FIREBASE_ENABLED = __FIREBASE_ENABLED__;
+const FIREBASE_CONFIG  = __FIREBASE_CONFIG__;
+
+if (FIREBASE_ENABLED) {
+  const { initializeApp }                      = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js');
+  const { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+                                               = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+  const { getFirestore, doc, getDoc }          = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+
+  const app  = initializeApp(FIREBASE_CONFIG);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+
+  const overlay    = document.getElementById('auth-overlay');
+  const loginBtn   = document.getElementById('auth-login-btn');
+  const authMsg    = document.getElementById('auth-msg');
+  const mainPage   = document.querySelector('.page');
+  const authStatus = document.getElementById('auth-status');
+  const authEmail  = document.getElementById('auth-email');
+
+  async function checkWhitelist(email) {
+    const ref = doc(db, 'whitelist', email.toLowerCase());
+    const snap = await getDoc(ref);
+    return snap.exists();
+  }
+
+  async function handleLogin() {
+    authMsg.textContent = '';
+    try {
+      const provider = new GoogleAuthProvider();
+      const result   = await signInWithPopup(auth, provider);
+      const email    = result.user.email;
+      const allowed  = await checkWhitelist(email);
+      if (!allowed) {
+        authMsg.textContent = `접근 권한이 없습니다.\n(${email})`;
+        await signOut(auth);
+      }
+    } catch (e) {
+      if (e.code !== 'auth/popup-closed-by-user') {
+        authMsg.textContent = '로그인 실패: ' + e.message;
+      }
+    }
+  }
+
+  onAuthStateChanged(auth, async user => {
+    if (!user) {
+      overlay.style.display     = 'flex';
+      mainPage.style.display    = 'none';
+      authStatus.style.display  = 'none';
+      authEmail.textContent     = '';
+      return;
+    }
+    const allowed = await checkWhitelist(user.email);
+    if (!allowed) {
+      overlay.style.display     = 'flex';
+      mainPage.style.display    = 'none';
+      authStatus.style.display  = 'none';
+      authMsg.textContent       = `접근 권한이 없습니다.\n(${user.email})`;
+      await signOut(auth);
+      return;
+    }
+    overlay.style.display     = 'none';
+    mainPage.style.display    = '';
+    authStatus.style.display  = 'flex';
+    authEmail.textContent     = user.email;
+  });
+
+  loginBtn.addEventListener('click', handleLogin);
+  logoutBtn.addEventListener('click', () => signOut(auth));
+
+  window.__authLogout = () => signOut(auth);
+} else {
+  // Firebase 비활성 시 로그인 화면 숨김
+  const overlay  = document.getElementById('auth-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+</script>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; background: #f0f2f5; color: #222; }
   .page { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
+
+  /* ── Firebase 로그인 오버레이 ── */
+  #auth-overlay {
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: linear-gradient(135deg, #1a2a4a 0%, #0c4da2 100%);
+    align-items: center; justify-content: center;
+  }
+  #auth-box {
+    background: white; border-radius: 16px; padding: 40px 36px;
+    width: min(400px, 90vw); text-align: center;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+  }
+  #auth-box h1 { font-size: 17px; color: #1a2a4a; margin: 0 0 6px; font-weight: 700; }
+  #auth-box p  { font-size: 13px; color: #888; margin: 0 0 28px; }
+  #auth-login-btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 12px 20px; border: 1.5px solid #d0d7e3; border-radius: 8px;
+    background: white; cursor: pointer; font-size: 14px; font-weight: 600; color: #333;
+    transition: background .15s, box-shadow .15s;
+  }
+  #auth-login-btn:hover { background: #f5f5f5; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  #auth-login-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+  #auth-msg {
+    margin-top: 16px; font-size: 12px; color: #e74c3c;
+    white-space: pre-line; min-height: 18px;
+  }
+  #auth-footer {
+    margin-top: 20px; font-size: 11px; color: #ccc;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #auth-user { font-size: 12px; color: #555; }
+  #auth-logout-btn {
+    display: none; font-size: 12px; color: #888; border: none; background: none;
+    cursor: pointer; text-decoration: underline; padding: 0;
+  }
   h2 { margin: 0 0 20px; font-size: 20px; color: #1a2a4a; }
 
   .controls { background: white; border-radius: 10px; padding: 16px 20px; margin-bottom: 12px;
@@ -222,6 +355,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     background: white; cursor: pointer; font-size: 13px; font-weight: 600; color: #555;
   }
   .modal-tab.on { background: #16a085; border-color: #16a085; color: white; }
+  .modal-add-toggle {
+    display: flex; align-items: center; gap: 6px; margin-left: auto;
+    font-size: 12px; color: #555; cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  .modal-add-toggle input { display: none; }
+  .modal-add-slider {
+    display: inline-block; width: 32px; height: 18px; border-radius: 9px;
+    background: #ccc; position: relative; transition: background .2s; flex-shrink: 0;
+  }
+  .modal-add-slider::after {
+    content: ''; position: absolute; left: 2px; top: 2px;
+    width: 14px; height: 14px; border-radius: 50%; background: white; transition: left .2s;
+  }
+  .modal-add-toggle input:checked + .modal-add-slider { background: #e67e22; }
+  .modal-add-toggle input:checked + .modal-add-slider::after { left: 16px; }
   #modal-chart { width: 100%; }
 
   #grade-summary { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 12px; }
@@ -330,8 +478,40 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
+
+<!-- Firebase 로그인 오버레이 -->
+<div id="auth-overlay">
+  <div id="auth-box">
+    <h1>한성과학고등학교 입시 분석</h1>
+    <p>접근 권한이 있는 계정으로 로그인하세요.</p>
+    <button id="auth-login-btn">
+      <!-- Google 로고 SVG -->
+      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      Google 계정으로 로그인
+    </button>
+    <div id="auth-msg"></div>
+    <div id="auth-footer">
+      <span id="auth-user"></span>
+      <button id="auth-logout-btn" onclick="window.__authLogout && window.__authLogout()">로그아웃</button>
+    </div>
+  </div>
+</div>
+
 <div class="page">
-  <h2>한성과학고등학교 대학교별 내신 등급 입시 결과 분석</h2>
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+    <h2 style="margin:0;">한성과학고등학교 대학교별 내신 등급 입시 결과 분석</h2>
+    <div id="auth-status" style="display:none; align-items:center; gap:10px; font-size:12px; color:#666;">
+      <span id="auth-email"></span>
+      <button onclick="window.__authLogout && window.__authLogout()"
+        style="font-size:12px; color:#888; border:1px solid #d0d7e3; border-radius:12px;
+               background:white; padding:4px 12px; cursor:pointer;">로그아웃</button>
+    </div>
+  </div>
 
   <div class="controls">
     <div class="ctrl-group">
@@ -377,6 +557,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
     </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">학과 검색</div>
+      <input type="text" id="dept-filter" placeholder="예: 기계  전기" title="띄어쓰기/쉼표로 구분 시 OR 검색"
+        style="height:30px; padding:0 8px; border:1.5px solid #d0d7e3; border-radius:6px; font-size:13px; width:130px; outline:none;">
+    </div>
     <div class="ctrl-group" style="margin-left:auto; align-self:flex-end;">
       <div style="font-size:11px; color:#bbb; line-height:1.7; text-align:right;">
         x축: <b>대학명 (최종합격/총지원)</b><br>
@@ -403,6 +588,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <button class="modal-tab on" onclick="switchModalTab('year', this)">연도별</button>
       <button class="modal-tab"    onclick="switchModalTab('dept', this)">학과별</button>
       <button class="modal-tab"    onclick="switchModalTab('type', this)">전형별</button>
+      <label class="modal-add-toggle" title="추가합격 구분 표시 (메인 차트와 연동)">
+        <input type="checkbox" id="modal-toggle-add" onchange="syncAdditional(this.checked)">
+        <span class="modal-add-slider"></span>
+        추가합격 구분
+      </label>
     </div>
     <div id="modal-chart"></div>
   </div>
@@ -428,6 +618,7 @@ const state = {
   myGrade: null,
   showNoPass: false,
   showAdditional: false,
+  deptFilter: '',
 };
 
 const ADD_COLOR    = '#e67e22'; // 추가합격 (주황)
@@ -519,8 +710,35 @@ document.getElementById('toggle-nopass').addEventListener('change', e => {
 });
 document.getElementById('toggle-additional').addEventListener('change', e => {
   state.showAdditional = e.target.checked;
+  document.getElementById('modal-toggle-add').checked = e.target.checked;
   render();
 });
+
+// 학과 검색 (OR, 부분 일치)
+document.getElementById('dept-filter').addEventListener('input', e => {
+  state.deptFilter = e.target.value.trim();
+  render();
+});
+
+// 모달 내 추가합격 토글 (메인 차트와 연동)
+function syncAdditional(val) {
+  state.showAdditional = val;
+  document.getElementById('toggle-additional').checked = val;
+  render();
+  if (drillUniv) {
+    if (drillTab === 'year') renderModalYear();
+    else if (drillTab === 'dept') renderModalDept();
+    else renderModalType();
+  }
+}
+
+// 학과 필터 매칭: 띄어쓰기/쉼표 구분으로 OR 검색
+function matchesDeptFilter(dept) {
+  if (!state.deptFilter) return true;
+  const d = (dept || '').toLowerCase();
+  const keys = state.deptFilter.toLowerCase().split(/[\s,]+/).filter(k => k.length > 0);
+  return keys.some(k => d.includes(k));
+}
 
 // ── helpers ────────────────────────────────────────────
 function median(arr) {
@@ -559,7 +777,8 @@ function renderBox() {
     state.gradeYears.has(r['학년']) &&
     r['is_medical'] === isMedical &&
     (state.filter === '전체' || r['admission_type'] === state.filter) &&
-    r[gradeKey] != null
+    r[gradeKey] != null &&
+    matchesDeptFilter(r['모집단위'])
   );
 
   const byUniv = {};
@@ -712,6 +931,15 @@ function renderBox() {
   const chartW = isMobile ? Math.max(window.innerWidth - 16, univs.length * 36 + 160) : undefined;
   const chartH = isMobile ? 440 : 620;
 
+  // 현재 X/Y축 줌 상태 보존 (토글 등 재렌더 시 초기화 방지)
+  const _cel = document.getElementById('chart');
+  const _yRange = (_cel && _cel.layout && _cel.layout.yaxis && _cel.layout.yaxis.range)
+    ? _cel.layout.yaxis.range.slice()
+    : [9.2, 0.8];
+  const _xRange = (_cel && _cel.layout && _cel.layout.xaxis && _cel.layout.xaxis.range)
+    ? _cel.layout.xaxis.range.slice()
+    : undefined;
+
   Plotly.react('chart', traces, {
     title: { text: `${yearLabel}년 ${state.cat}${typeLabel} · ${gradeLabel} 기준`, font: { size: isMobile ? 12 : 16 } },
     xaxis: {
@@ -719,8 +947,9 @@ function renderBox() {
       categoryorder: 'array', categoryarray: univs,
       tickangle: -38, tickvals: univs, ticktext: univs.map(u => `${u}(${nFinal[u]}/${nTotal[u]})`),
       fixedrange: false,
+      ...(_xRange ? { range: _xRange } : {}),
     },
-    yaxis: { title: gradeKey, range: [9.2, 0.8], fixedrange: true },
+    yaxis: { title: gradeKey, range: _yRange, fixedrange: false },
     dragmode: isMobile ? 'pan' : 'zoom',
     clickmode: 'event',
     boxmode: 'group',
@@ -823,6 +1052,7 @@ function openDrilldown(univ) {
   const typeLabel  = state.filter === '전체' ? '전체 전형' : state.filter;
   document.getElementById('modal-title').textContent = univ;
   document.getElementById('modal-sub').textContent   = `${typeLabel} · ${gradeLabel} 기준`;
+  document.getElementById('modal-toggle-add').checked = state.showAdditional;
   document.getElementById('modal-overlay').classList.add('open');
   renderModalYear();
 }
@@ -1083,7 +1313,9 @@ def prepare_and_visualize(file_path):
     records, years = prepare_data(file_path)
     html = HTML_TEMPLATE \
         .replace('__DATA__', json.dumps(records, ensure_ascii=False)) \
-        .replace('__YEARS__', json.dumps(years))
+        .replace('__YEARS__', json.dumps(years)) \
+        .replace('__FIREBASE_ENABLED__', 'true' if FIREBASE_ENABLED else 'false') \
+        .replace('__FIREBASE_CONFIG__', json.dumps(FIREBASE_CONFIG, ensure_ascii=False))
 
     output_path = os.path.splitext(file_path)[0] + '_admission_analysis.html'
     with open(output_path, 'w', encoding='utf-8') as f:
