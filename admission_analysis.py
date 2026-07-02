@@ -1677,7 +1677,10 @@ def prepare_and_visualize(file_path):
             .replace('__FIREBASE_ENABLED__', 'true' if FIREBASE_ENABLED else 'false') \
             .replace('__FIREBASE_CONFIG__', json.dumps(FIREBASE_CONFIG, ensure_ascii=False))
 
-    output_path = os.path.splitext(file_path)[0] + '_admission_analysis.html'
+    if FIREBASE_DATA:
+        output_path = os.path.join(os.path.dirname(os.path.abspath(file_path)), 'index.html')
+    else:
+        output_path = os.path.splitext(file_path)[0] + '_admission_analysis.html'
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f'저장: {output_path}')
