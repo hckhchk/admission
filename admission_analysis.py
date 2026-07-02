@@ -1182,6 +1182,20 @@ function buildBoxTraces(rows, xKey, order) {
   return traces;
 }
 
+// 모달 차트 공통 Plotly config
+const MODAL_CONFIG = {
+  responsive: true,
+  scrollZoom: true,
+  dragmode: 'pan',
+  displayModeBar: 'hover',
+  modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toImage'],
+};
+
+// 모달 위에서 휠 시 페이지 스크롤 차단
+document.getElementById('modal-chart').addEventListener('wheel', e => {
+  e.stopPropagation();
+}, { passive: false });
+
 // 연도별 뷰
 function renderModalYear() {
   const gradeKey = state.grade;
@@ -1201,11 +1215,11 @@ function renderModalYear() {
     xaxis: { title: '입시 연도', categoryorder: 'array',
              categoryarray: allYears.map(y => y + '년') },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
-    boxmode: 'group',
+    boxmode: 'group', dragmode: 'pan',
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
     height: 420, margin: { b: 60, t: 16, r: 90 },
     plot_bgcolor: '#fafbff', shapes, annotations,
-  }, { responsive: true });
+  }, MODAL_CONFIG);
 }
 
 // 학과별 뷰
@@ -1221,7 +1235,7 @@ function renderModalDept() {
   );
 
   if (!rows.length) {
-    Plotly.react('modal-chart', [], { height: 200 }, { responsive: true });
+    Plotly.react('modal-chart', [], { height: 200 }, MODAL_CONFIG);
     return;
   }
 
@@ -1246,11 +1260,11 @@ function renderModalDept() {
     xaxis: { title: '모집단위(학과)', categoryorder: 'array',
              categoryarray: deptOrder, tickangle: -35 },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
-    boxmode: 'group',
+    boxmode: 'group', dragmode: 'pan',
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
     height: 440, margin: { b: 130, t: 30, r: 90 },
     plot_bgcolor: '#fafbff', shapes, annotations,
-  }, { responsive: true });
+  }, MODAL_CONFIG);
 }
 
 // 전형별 뷰 (admission_type 필터 무시, 모든 전형명칭 비교)
@@ -1267,7 +1281,7 @@ function renderModalType() {
   );
 
   if (!rows.length) {
-    Plotly.react('modal-chart', [], { height: 200 }, { responsive: true });
+    Plotly.react('modal-chart', [], { height: 200 }, MODAL_CONFIG);
     return;
   }
 
@@ -1291,11 +1305,11 @@ function renderModalType() {
     xaxis: { title: '전형명칭', categoryorder: 'array',
              categoryarray: typeOrder, tickangle: -35 },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
-    boxmode: 'group',
+    boxmode: 'group', dragmode: 'pan',
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
     height: 440, margin: { b: 130, t: 30, r: 90 },
     plot_bgcolor: '#fafbff', shapes, annotations,
-  }, { responsive: true });
+  }, MODAL_CONFIG);
 }
 
 // 모달 닫기
