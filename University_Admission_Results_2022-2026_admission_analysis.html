@@ -32,24 +32,24 @@ if (FIREBASE_ENABLED) {
   const authEmail  = document.getElementById('auth-email');
 
   async function checkWhitelist(email) {
-    const ref = doc(db, 'Whitelist', email.toLowerCase());
-    const snap = await getDoc(ref);
-    return snap.exists();
+    try {
+      const ref  = doc(db, 'Whitelist', email.toLowerCase());
+      const snap = await getDoc(ref);
+      return snap.exists();
+    } catch (e) {
+      // permission-denied → 화이트리스트에 없는 것으로 처리
+      return false;
+    }
   }
 
+  // 로그인 버튼: 팝업만 띄우고, 권한 체크는 onAuthStateChanged가 담당
   async function handleLogin() {
     authMsg.textContent = '';
     try {
       const provider = new GoogleAuthProvider();
-      // 이미 로그인된 계정이 있어도 계정 선택 화면을 항상 표시
       provider.setCustomParameters({ prompt: 'select_account' });
-      const result   = await signInWithPopup(auth, provider);
-      const email    = result.user.email;
-      const allowed  = await checkWhitelist(email);
-      if (!allowed) {
-        authMsg.textContent = `❌ 접근 권한이 없는 계정입니다.\n로그인 시도: ${email}\n\n관리자에게 해당 이메일 등록을 요청하세요.`;
-        await signOut(auth);
-      }
+      await signInWithPopup(auth, provider);
+      // 이후 처리는 onAuthStateChanged에서
     } catch (e) {
       if (e.code !== 'auth/popup-closed-by-user') {
         authMsg.textContent = '로그인 실패: ' + e.message;
@@ -65,12 +65,14 @@ if (FIREBASE_ENABLED) {
       authEmail.textContent     = '';
       return;
     }
+    // 토큰이 Firestore에 전파될 때까지 대기
+    await user.getIdToken(true);
     const allowed = await checkWhitelist(user.email);
     if (!allowed) {
       overlay.style.display     = 'flex';
       mainPage.style.display    = 'none';
       authStatus.style.display  = 'none';
-      authMsg.textContent       = `접근 권한이 없습니다.\n(${user.email})`;
+      authMsg.textContent       = `❌ 접근 권한이 없는 계정입니다.\n로그인 시도: ${user.email}\n\n관리자에게 해당 이메일 등록을 요청하세요.`;
       await signOut(auth);
       return;
     }
