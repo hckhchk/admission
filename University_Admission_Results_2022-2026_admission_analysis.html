@@ -892,6 +892,10 @@ function updateSummary(byUniv, univs, gradeKey) {
 let _zoomY = [9.2, 0.8]; // 기본: 역순 (낮은 등급이 위)
 let _zoomX = null;
 
+// 모달 차트 전용 줌 상태
+let _modalZoomY = [9.2, 0.8];
+let _modalZoomX = null;
+
 // ── 드릴다운 모달 ───────────────────────────────────────
 let drillUniv = null;
 let drillTab = 'year';
@@ -899,6 +903,9 @@ let drillTab = 'year';
 function openDrilldown(univ) {
   drillUniv = univ;
   drillTab = 'year';
+  // 새 대학 열 때 모달 줌 초기화
+  _modalZoomY = [9.2, 0.8];
+  _modalZoomX = null;
   // 탭 버튼 초기화
   document.querySelectorAll('.modal-tab').forEach((b, i) => b.classList.toggle('on', i === 0));
   const gradeLabel = state.grade === '국영수과 등평' ? '국영수과' : '전교과';
@@ -1032,8 +1039,21 @@ document.getElementById('modal-chart').addEventListener('wheel', e => {
   e.stopPropagation();
 }, { passive: false });
 
+// 모달 줌 save/restore 헬퍼
+async function modalReact(traces, layout) {
+  const savedY = _modalZoomY.slice();
+  const savedX = _modalZoomX ? _modalZoomX.slice() : null;
+  await Plotly.react('modal-chart', traces, {
+    ...layout,
+    yaxis: { ...layout.yaxis, range: savedY },
+    ...(savedX ? { xaxis: { ...layout.xaxis, range: savedX } } : { xaxis: layout.xaxis }),
+  }, MODAL_CONFIG);
+  _modalZoomY = savedY;
+  _modalZoomX = savedX;
+}
+
 // 연도별 뷰
-function renderModalYear() {
+async function renderModalYear() {
   const gradeKey = state.grade;
   const allYears = [...YEARS].sort();
   const rows = RAW.filter(r =>
@@ -1047,7 +1067,7 @@ function renderModalYear() {
   const traces = buildBoxTraces(rows, '_yearLabel', allYears.map(y => y + '년'));
   const { shapes, annotations } = modalShapes();
 
-  Plotly.react('modal-chart', traces, {
+  await modalReact(traces, {
     xaxis: { title: '입시 연도', categoryorder: 'array',
              categoryarray: allYears.map(y => y + '년') },
     yaxis: { title: gradeKey, range: [9.2, 0.8] },
@@ -1055,11 +1075,11 @@ function renderModalYear() {
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
     height: 420, margin: { b: 60, t: 16, r: 90 },
     plot_bgcolor: '#fafbff', shapes, annotations,
-  }, MODAL_CONFIG);
+  });
 }
 
 // 학과별 뷰
-function renderModalDept() {
+async function renderModalDept() {
   const gradeKey = state.grade;
   const rows = RAW.filter(r =>
     r['대학교명'] === drillUniv &&
@@ -1091,7 +1111,7 @@ function renderModalDept() {
   const { shapes, annotations } = modalShapes();
   const yearLabel = [...state.years].sort().join(', ');
 
-  Plotly.react('modal-chart', traces, {
+  await modalReact(traces, {
     title: { text: `${yearLabel}년 선택`, font: { size: 12, color: '#aaa' } },
     xaxis: { title: '모집단위(학과)', categoryorder: 'array',
              categoryarray: deptOrder, tickangle: -35 },
@@ -1100,11 +1120,11 @@ function renderModalDept() {
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
     height: 440, margin: { b: 130, t: 30, r: 90 },
     plot_bgcolor: '#fafbff', shapes, annotations,
-  }, MODAL_CONFIG);
+  });
 }
 
 // 전형별 뷰 (admission_type 필터 무시, 모든 전형명칭 비교)
-function renderModalType() {
+async function renderModalType() {
   const gradeKey = state.grade;
   const isMedical = state.cat === '메디컬계열';
   const rows = RAW.filter(r =>
@@ -1136,7 +1156,7 @@ function renderModalType() {
   const { shapes, annotations } = modalShapes();
   const yearLabel = [...state.years].sort().join(', ');
 
-  Plotly.react('modal-chart', traces, {
+  await modalReact(traces, {
     title: { text: `${yearLabel}년 선택`, font: { size: 12, color: '#aaa' } },
     xaxis: { title: '전형명칭', categoryorder: 'array',
              categoryarray: typeOrder, tickangle: -35 },
@@ -1145,7 +1165,7 @@ function renderModalType() {
     legend: { orientation: 'h', y: 1.1, x: 1, xanchor: 'right' },
     height: 440, margin: { b: 130, t: 30, r: 90 },
     plot_bgcolor: '#fafbff', shapes, annotations,
-  }, MODAL_CONFIG);
+  });
 }
 
 // 모달 닫기
@@ -1180,6 +1200,19 @@ document.getElementById('chart').on('plotly_relayout', ev => {
     _zoomX = [ev['xaxis.range[0]'], ev['xaxis.range[1]']];
   } else if (ev['xaxis.autorange']) {
     _zoomX = null;
+  }
+});
+
+document.getElementById('modal-chart').on('plotly_relayout', ev => {
+  if (ev['yaxis.range[0]'] !== undefined) {
+    _modalZoomY = [ev['yaxis.range[0]'], ev['yaxis.range[1]']];
+  } else if (ev['yaxis.autorange']) {
+    _modalZoomY = [9.2, 0.8];
+  }
+  if (ev['xaxis.range[0]'] !== undefined) {
+    _modalZoomX = [ev['xaxis.range[0]'], ev['xaxis.range[1]']];
+  } else if (ev['xaxis.autorange']) {
+    _modalZoomX = null;
   }
 });
 </script>
