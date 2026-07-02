@@ -71,6 +71,9 @@ def prepare_data(file_path):
         '대학교명':      ['대학교명', '대학', '학교'],
         '국영수과 등평': ['국영수과 등평', '국영수과등평'],
         '전교과 등평':   ['전교과 등평', '전교과등평'],
+        '수학과학 등평': ['수학과학 등평', '수학과학등평'],
+        '수학 등평':     ['수학 등평', '수학등평'],
+        '과학 등평':     ['과학\n 등평', '과학 등평', '과학등평'],
         '학년':          ['학년'],
         '모집단위':      ['모집 단위(학과)', '모집단위', '학과', '모집'],
         '전형명칭':      ['전형명칭', '전형명'],
@@ -99,10 +102,11 @@ def prepare_data(file_path):
 
     df = df.rename(columns={v: k for k, v in col_map.items()})
     df['국영수과 등평'] = pd.to_numeric(df['국영수과 등평'], errors='coerce')
-    if '전교과 등평' in df.columns:
-        df['전교과 등평'] = pd.to_numeric(df['전교과 등평'], errors='coerce')
-    else:
-        df['전교과 등평'] = float('nan')
+    for g in ('전교과 등평', '수학과학 등평', '수학 등평', '과학 등평'):
+        if g in df.columns:
+            df[g] = pd.to_numeric(df[g], errors='coerce')
+        else:
+            df[g] = float('nan')
     df = df.dropna(subset=['국영수과 등평', '대학교명', '대입연도'])
     df['대입연도'] = df['대입연도'].astype(int)
 
@@ -212,7 +216,7 @@ def prepare_data(file_path):
         else:
             df[col] = df[col].apply(lambda x: '' if str(x).strip().lower() in ('nan', 'none') else str(x).strip())
 
-    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type', 'is_suneung_fail', 'wait_num', 'add_info', 'enroll_info', '학번', '이름']
+    cols = ['대입연도', '학년', '대학교명', '국영수과 등평', '전교과 등평', '수학과학 등평', '수학 등평', '과학 등평', '모집단위', '전형명칭', '상태구분', 'is_additional', 'is_nonattend', 'is_medical', 'admission_type', 'is_suneung_fail', 'wait_num', 'add_info', 'enroll_info', '학번', '이름']
     records = df[cols].to_dict('records')
     years = sorted(df['대입연도'].unique().tolist())
     return records, years
@@ -1147,6 +1151,7 @@ let _modalZoomX = null;
 let drillUniv = null;
 let drillTab = 'year';
 let drillStudent = null;  // { hakbun, year }
+let showStuInfo = false;  // 이름/학번 표시 토글
 
 function openDrilldown(univ, student = null) {
   drillUniv = univ;
@@ -1207,22 +1212,38 @@ function renderModalStudent() {
 
   const statusOrder = { '최종합격': 0, '1차합격_최종탈락': 1, '1차탈락': 2 };
   rows.sort((a, b) => (statusOrder[a['상태구분']] ?? 3) - (statusOrder[b['상태구분']] ?? 3));
+  const r0 = rows[0];
+  const haknyeon = r0['학년'] || '';
 
-  const gradeKey = state.grade;
-  const grade = rows[0][gradeKey];
-  const name  = rows[0]['이름'] || '';
-  const haknyeon = rows[0]['학년'] || '';
+  // 5개 등급 (null/NaN 제외)
+  const gradeCols = [
+    ['전교과', r0['전교과 등평']],
+    ['국영수과', r0['국영수과 등평']],
+    ['수학과학', r0['수학과학 등평']],
+    ['수학', r0['수학 등평']],
+    ['과학', r0['과학 등평']],
+  ];
+  const gradeHtml = gradeCols
+    .filter(([, v]) => v != null && !isNaN(Number(v)))
+    .map(([k, v]) => `<span style="white-space:nowrap">${k} <b>${Number(v).toFixed(2)}</b></span>`)
+    .join('<span style="color:#ccc;margin:0 4px">|</span>');
+
+  // 이름/학번은 토글 ON일 때만
+  const identHtml = showStuInfo
+    ? `<b style="font-size:15px;color:#1A2A4A">${r0['이름'] || ''}</b>
+       <span style="color:#888;font-size:12px">학번: ${hakbun}</span>`
+    : '';
 
   const badgeStyle = {
-    '최종합격':          'background:#0c4da2',
-    '추가합격':          'background:#e67e22',
-    '1차합격_최종탈락':  'background:#5a9fd4',
-    '1차탈락':           'background:#aaaaaa',
-    '미응시':            'background:#cccccc',
+    '최종합격':         'background:#0c4da2',
+    '추가합격':         'background:#e67e22',
+    '1차합격_최종탈락': 'background:#5a9fd4',
+    '1차탈락':          'background:#aaaaaa',
+    '미응시':           'background:#bbbbbb',
   };
 
   let rows_html = '';
-  rows.forEach((r, i) => {
+  rows.forEach(r => {
     const status = r['상태구분'];
     let badge = status;
     if (status === '최종합격' && r['is_additional']) badge = '추가합격';
@@ -1250,10 +1271,18 @@ function renderModalStudent() {
   el.innerHTML = `
     <div style="padding:14px 16px 8px">
       <div class="stu-header">
-        ${name ? `<b>${name}</b>` : ''}
-        <span>${haknyeon ? haknyeon + '학년 · ' : ''}${year}년도 입시</span>
-        <span>${gradeKey}: <b>${grade != null ? Number(grade).toFixed(2) : '-'}</b></span>
-        <span style="color:#999">총 ${rows.length}개교 지원</span>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:#555;white-space:nowrap;margin-right:6px">
+          <input type="checkbox" ${showStuInfo ? 'checked' : ''}
+            onchange="showStuInfo=this.checked; renderModalStudent()"
+            style="width:14px;height:14px;cursor:pointer">
+          이름/학번 표시
+        </label>
+        ${identHtml}
+        <span style="font-size:13px;color:#555">${haknyeon ? haknyeon + '학년 · ' : ''}${year}년도 입시</span>
+        <span style="font-size:12px;color:#999">총 ${rows.length}개교 지원</span>
+        <div style="flex-basis:100%;margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;font-size:13px;color:#444">
+          ${gradeHtml}
+        </div>
       </div>
       <table class="stu-table">
         <thead><tr>
