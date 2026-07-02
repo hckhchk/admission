@@ -657,7 +657,7 @@ function extraInfo(r) {
   let s = '';
   if (r['is_suneung_fail']) s += '<br>⚠ 수능최저 미충족';
   if (r['wait_num'])    s += '<br>예비 ' + r['wait_num'] + '번';
-  if (r['add_info'] && r['add_info'] !== '추가합격') s += '<br>추가합격: ' + r['add_info'];
+  if (r['add_info'] && r['add_info'] !== '추가 합격' && r['add_info'] !== '추가합격') s += '<br>추가합격: ' + r['add_info'];
   if (r['enroll_info']) s += '<br>등록: ' + r['enroll_info'];
   return s;
 }
