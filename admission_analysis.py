@@ -458,6 +458,14 @@ if (FIREBASE_ENABLED) {
   .landing-hint { font-size: 13px; color: #888; }
   .landing-hint b { color: #0c4da2; }
 
+  /* ── 소수 선발 전형 경고 배너 ── */
+  #special-notice {
+    background: #fef5e7; border: 1px solid #f0c36d; border-left: 4px solid #e67e22;
+    border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+    font-size: 12.5px; color: #7a4a10; line-height: 1.6;
+  }
+  #special-notice b { color: #b9520a; }
+
   /* 드릴다운 모달 */
   #modal-overlay {
     display: none; position: fixed; inset: 0;
@@ -590,6 +598,7 @@ if (FIREBASE_ENABLED) {
     .seg { min-height: 36px; }
     .landing-ctrl { margin: 4px 8px 8px; border-radius: 10px; }
     #univ-select { width: 100%; min-width: 0; min-height: 40px; }
+    #special-notice { margin: 4px 8px 8px; }
 
     /* 토글 그룹 */
     .toggle-group { flex-direction: row; flex-wrap: wrap; gap: 16px; }
@@ -694,6 +703,9 @@ if (FIREBASE_ENABLED) {
       <input type="number" id="my-grade" class="grade-input" min="1" max="9" step="0.01" placeholder="예: 2.30">
     </div>
   </div>
+
+  <!-- 소수 선발 전형 경고 (특별전형/특기자전형 선택 시 표시) -->
+  <div id="special-notice" style="display:none;"></div>
 
   <!-- 상단 탭 -->
   <div class="main-tabs">
@@ -1305,7 +1317,8 @@ function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier
     const grades = byUniv[u].filter(r => r['상태구분'] === '최종합격').map(r => r[gradeKey]).filter(v => v != null);
     if (!grades.length) continue;
     const n = grades.length;
-    const entry = { u, n };
+    const total = byUniv[u].length;  // 지원(성적 있는) 전체 = 합격+최종탈락+1차탈락
+    const entry = { u, n, total };
     if (fourTier) {
       const t = tierOf(g, boxStats(grades));
       if      (t === 'stable') stable.push(entry);
@@ -1326,8 +1339,10 @@ function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier
   function chip(entry, cls) {
     const lowN = entry.n < LOW_N;
     const style = lowN ? 'opacity:0.5; border: 1px dashed #aaa;' : '';
-    const nLabel = lowN ? ` (n=${entry.n}⚠)` : `(n=${entry.n})`;
-    return `<span class="chip ${cls}" style="${style}" title="${lowN ? '합격 사례 수가 적어 참고용으로만 활용하세요' : ''}">${entry.u} ${nLabel}</span>`;
+    const warn = lowN ? ' ⚠' : '';
+    const tip = lowN ? '합격 사례 수가 적어 참고용으로만 활용하세요'
+                     : '합격 = 최종합격자 수, 지원 = 같은 조건의 최종합격·최종탈락·1차탈락 합계';
+    return `<span class="chip ${cls}" style="${style}" title="${tip}">${entry.u} (합격 ${entry.n}/지원 ${entry.total})${warn}</span>`;
   }
 
   function group(title, color, cls, items, hint) {
@@ -1339,9 +1354,10 @@ function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier
     </div>`;
   }
 
-  const disclaimer = `<div style="font-size:11px;color:#aaa;margin-top:10px;line-height:1.6;">
-    ※ 위 분류는 과거 합격자 등급 분포 내 위치를 나타낸 참고 자료입니다. 실제 합격 여부와 다를 수 있으며,
-    전형별 특성·수능최저·면접 등 다양한 요소가 결과에 영향을 줍니다.
+  const disclaimer = `<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.7;">
+    ※ 위 구분은 <b>최종합격자 분포만</b> 기준입니다. 같은 등급대에도 1차탈락·최종탈락 사례가 함께 있을 수 있으니,
+    차트의 <b>회색(1차탈락)·연파랑(1차합격_최종탈락) 분포도 반드시 함께</b> 확인하세요. ('적정'이어도 지원 대비 합격 비율이 낮을 수 있습니다.)<br>
+    ※ 실제 합격 여부와 다를 수 있으며, 전형별 특성·수능최저·면접 등 다양한 요소가 결과에 영향을 줍니다.
     ⚠ 표시는 합격 사례 ${LOW_N}건 미만으로 통계적 신뢰도가 낮습니다.
   </div>`;
 
@@ -1890,8 +1906,23 @@ function switchLandingMode(mode) {
 
 document.getElementById('univ-select').addEventListener('change', renderLanding);
 
+// ── 소수 선발 전형 경고 (특별전형/특기자전형) ─────────────
+function updateSpecialNotice() {
+  const el = document.getElementById('special-notice');
+  if (!el) return;
+  const SMALL_INTAKE = ['특별전형', '특기자전형'];
+  if (SMALL_INTAKE.includes(state.filter)) {
+    el.style.display = '';
+    el.innerHTML = `⚠ <b>${state.filter}</b>은 소수 인원을 선발해, 당해 지원자 풀에 따라 합격자 등급 평균이 `
+      + `<b>크게 달라질 수 있습니다.</b> 연도별 편차가 크므로 해석에 특히 주의하세요.`;
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 // ── dispatcher ─────────────────────────────────────────
 function render() {
+  updateSpecialNotice();
   if (mainTab === 'landing') renderLanding();
   else renderBox({ target: 'chart', summaryTarget: 'grade-summary' });
 }
