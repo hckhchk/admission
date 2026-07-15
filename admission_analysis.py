@@ -1031,7 +1031,8 @@ async function renderBox(opts = {}) {
     summaryTarget: 'grade-summary', // 요약 대상 div id (null이면 요약 없음)
     onlyUniv: null,             // 대학 모드: 이 대학만 표시
     univFilter: null,          // 등급 모드: st => bool (위수염 이내 판정)
-    tierColor: false,          // 등급 모드: x축 라벨에 티어 이모지 + 티어순 정렬
+    tierColor: false,          // 티어 표현: x축 라벨 이모지 + 요약을 도전/적정/안정으로
+    tierSort: false,           // 티어 순(도전→적정→안정) 재정렬 (전체 분석은 중간값 순 유지 위해 false)
     forceEmpty: false,         // 강제 빈 화면 (미선택/미입력 안내)
     placeholder: '해당 조건의 데이터가 없습니다.',
     ...opts,
@@ -1074,8 +1075,8 @@ async function renderBox(opts = {}) {
   const noPassUnivs = Object.keys(byUniv).filter(u => !orderedUnivs.includes(u));
   let univs = [...orderedUnivs, ...noPassUnivs];
 
-  // 등급 모드: 티어 순(도전→적정→안정, 중간값 오름차순 = 전체 분석 탭과 동일 방향)으로 정렬
-  if (cfg.tierColor && state.myGrade != null) {
+  // 티어 정렬 요청 시: 도전→적정→안정(그룹) + 그룹 내 중간값 오름차순
+  if (cfg.tierSort && state.myGrade != null) {
     const rank = { reach: 0, proper: 1, stable: 2 };
     univs.sort((a, b) => {
       const ra = rank[tierOf(state.myGrade, statOf[a])] ?? 9;
@@ -1301,12 +1302,11 @@ async function renderBox(opts = {}) {
   }
 
   // 합격권 요약
-  if (cfg.summaryTarget) updateSummary(byUniv, univs, gradeKey, cfg.summaryTarget, cfg.tierColor);
+  if (cfg.summaryTarget) updateSummary(byUniv, univs, gradeKey, cfg.summaryTarget);
 }
 
-// fourTier=false: 기존 Q1/중앙값/Q3 3구간 (전체 분석 탭)
-// fourTier=true:  Q1/Q3/위수염 기준 안정·적정·도전 (맞춤 조회 등급 모드)
-function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier = false) {
+// 위수염 기준 도전·적정·안정 요약 (맞춤 조회 등급 모드 · 전체 분석 탭 공통)
+function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary') {
   const el = document.getElementById(elId);
   if (!el) return;
   if (!state.myGrade) { el.innerHTML = ''; return; }
@@ -1319,19 +1319,10 @@ function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier
     const n = grades.length;
     const total = byUniv[u].length;  // 지원(성적 있는) 전체 = 합격+최종탈락+1차탈락
     const entry = { u, n, total };
-    if (fourTier) {
-      const t = tierOf(g, boxStats(grades));
-      if      (t === 'stable') stable.push(entry);
-      else if (t === 'proper') proper.push(entry);
-      else if (t === 'reach')  reach.push(entry);
-    } else {
-      const q1 = quantile(grades, 0.25);
-      const med = median(grades);
-      const q3 = quantile(grades, 0.75);
-      if (g < q1)        stable.push(entry);
-      else if (g <= med) proper.push(entry);
-      else if (g <= q3)  reach.push(entry);
-    }
+    const t = tierOf(g, boxStats(grades));
+    if      (t === 'stable') stable.push(entry);
+    else if (t === 'proper') proper.push(entry);
+    else if (t === 'reach')  reach.push(entry);
   }
 
   const LOW_N = 5;
@@ -1361,13 +1352,10 @@ function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier
     ⚠ 표시는 합격 사례 ${LOW_N}건 미만으로 통계적 신뢰도가 낮습니다.
   </div>`;
 
-  const groups = fourTier
-    ? group('🟠 도전권', '#784212', 'chip-reach', reach, `합격자 Q3~위수염 구간 — 사례는 있으나 상위 성적 필요`) +
-      group('🟡 적정권', '#9a7d0a', 'chip-proper', proper, `합격자 중간 50%(Q1~Q3) 구간 — 합격자 다수 분포권`) +
-      group('🟢 안정권', '#1e8449', 'chip-stable', stable, `내 등급(${g.toFixed(2)}) ≤ 합격자 상위 25%(Q1) — 여유 있는 지원권`)
-    : group('📊 합격자 상위 25% 이내', '#1e8449', 'chip-stable', stable, `입력한 등급(${g.toFixed(2)})이 최종합격자 하위 25% 등급보다 우수한 구간`) +
-      group('📊 합격자 중앙값 이내',   '#9a7d0a', 'chip-proper', proper, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값 이내 구간`) +
-      group('📊 합격자 중앙~상위 25% 구간', '#784212', 'chip-reach', reach, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값~상위 25% 등급 사이 구간`);
+  const groups =
+    group('🟠 도전권', '#784212', 'chip-reach', reach, `합격자 Q3~위수염 구간 — 사례는 있으나 상위 성적 필요`) +
+    group('🟡 적정권', '#9a7d0a', 'chip-proper', proper, `합격자 중간 50%(Q1~Q3) 구간 — 합격자 다수 분포권`) +
+    group('🟢 안정권', '#1e8449', 'chip-stable', stable, `내 등급(${g.toFixed(2)}) ≤ 합격자 상위 25%(Q1) — 여유 있는 지원권`);
   el.innerHTML = groups + disclaimer;
 }
 
@@ -1874,7 +1862,7 @@ function renderLanding() {
       renderBox({ target: 'landing-chart', summaryTarget: 'landing-summary', forceEmpty: true,
                   placeholder: "상단 '내 등급'을 입력하면 지원 가능 대학이 표시됩니다." });
     } else {
-      renderBox({ target: 'landing-chart', summaryTarget: 'landing-summary', tierColor: true,
+      renderBox({ target: 'landing-chart', summaryTarget: 'landing-summary', tierColor: true, tierSort: true,
                   univFilter: st => tierOf(state.myGrade, st) !== null,
                   placeholder: '입력한 등급으로 지원 가능 범위(위수염 이내)인 대학이 없습니다.' });
     }
@@ -1924,7 +1912,7 @@ function updateSpecialNotice() {
 function render() {
   updateSpecialNotice();
   if (mainTab === 'landing') renderLanding();
-  else renderBox({ target: 'chart', summaryTarget: 'grade-summary' });
+  else renderBox({ target: 'chart', summaryTarget: 'grade-summary', tierColor: true });
 }
 
 // Firestore 데이터 모드에서 Firebase 모듈이 데이터 로드 완료 후 호출
