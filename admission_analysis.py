@@ -527,7 +527,7 @@ if (FIREBASE_ENABLED) {
   .summary-chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
   .chip-stable { background: #d5f5e3; color: #1e8449; }
-  .chip-proper { background: #d6eaf8; color: #1a5276; }
+  .chip-proper { background: #fcf3cf; color: #9a7d0a; }
   .chip-reach  { background: #fdebd0; color: #784212; }
   .hint { font-size: 11px; color: #aaa; margin-top: 4px; }
 
@@ -842,7 +842,7 @@ const FIRST_COLOR  = '#0c4da2'; // 최초합격 (기존 최종합격 색)
 // 티어 색상 (요약 칩 클래스와 동일 계열)
 const TIER = {
   stable:  { emoji: '🟢', label: '안정권', cls: 'chip-stable' },
-  proper:  { emoji: '🔵', label: '적정권', cls: 'chip-proper' },
+  proper:  { emoji: '🟡', label: '적정권', cls: 'chip-proper' },
   reach:   { emoji: '🟠', label: '도전권', cls: 'chip-reach'  },
 };
 
@@ -1240,7 +1240,7 @@ async function renderBox(opts = {}) {
   const _savedZoomY = Z.y.slice();
   const _savedZoomX = Z.x ? Z.x.slice() : null;
 
-  // 등급 모드: x축 라벨에 티어 이모지 접두 (🟢안정 🔵적정 🟠도전)
+  // 등급 모드: x축 라벨에 티어 이모지 접두 (🟢안정 🟡적정 🟠도전)
   const tickText = univs.map(u => {
     const base = `${u}(${nFinal[u]}/${nTotal[u]})`;
     if (cfg.tierColor && state.myGrade != null) {
@@ -1363,10 +1363,10 @@ function updateSummary(byUniv, univs, gradeKey, elId = 'grade-summary', fourTier
 
   const groups = fourTier
     ? group('🟠 도전권', '#784212', 'chip-reach', reach, `합격자 Q3~위수염 구간 — 사례는 있으나 상위 성적 필요`) +
-      group('🔵 적정권', '#1a5276', 'chip-proper', proper, `합격자 중간 50%(Q1~Q3) 구간 — 합격자 다수 분포권`) +
+      group('🟡 적정권', '#9a7d0a', 'chip-proper', proper, `합격자 중간 50%(Q1~Q3) 구간 — 합격자 다수 분포권`) +
       group('🟢 안정권', '#1e8449', 'chip-stable', stable, `내 등급(${g.toFixed(2)}) ≤ 합격자 상위 25%(Q1) — 여유 있는 지원권`)
     : group('📊 합격자 상위 25% 이내', '#1e8449', 'chip-stable', stable, `입력한 등급(${g.toFixed(2)})이 최종합격자 하위 25% 등급보다 우수한 구간`) +
-      group('📊 합격자 중앙값 이내',   '#1a5276', 'chip-proper', proper, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값 이내 구간`) +
+      group('📊 합격자 중앙값 이내',   '#9a7d0a', 'chip-proper', proper, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값 이내 구간`) +
       group('📊 합격자 중앙~상위 25% 구간', '#784212', 'chip-reach', reach, `입력한 등급(${g.toFixed(2)})이 최종합격자 중앙값~상위 25% 등급 사이 구간`);
   el.innerHTML = groups + disclaimer;
 }
