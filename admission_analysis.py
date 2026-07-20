@@ -24,6 +24,8 @@ FIREBASE_CONFIG = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 MEDICAL_KEYWORDS = ['의예', '의학', '의과', '치의', '치과', '한의', '약학', '수의예']
+# 의료 키워드('의과' 등)에 걸리지만 실제로는 메디컬 계열이 아닌 학과 → 일반계열로 편입
+NON_MEDICAL_DEPTS = ['바이오시스템의과학부']  # 고려대 생명과학대학 (의과대학 아님)
 SPECIAL_KEYWORDS = [
     '기초생활', '기회균형', '기회균등', '고른기회', '사회통합', '차상위',
     '저소득', '이웃사랑', '국가보훈', '농어촌', '다문화', '특수교육',
@@ -124,7 +126,13 @@ def prepare_data(file_path):
     df['상태구분'] = df.apply(categorize_status, axis=1)
 
     medical_pat = '|'.join(MEDICAL_KEYWORDS)
-    df['is_medical'] = df['모집단위'].str.contains(medical_pat, na=False) if '모집단위' in df.columns else False
+    if '모집단위' in df.columns:
+        df['is_medical'] = df['모집단위'].str.contains(medical_pat, na=False)
+        # 의료 키워드에 걸리지만 실제 메디컬이 아닌 학과는 제외
+        nonmed_pat = '|'.join(NON_MEDICAL_DEPTS)
+        df.loc[df['모집단위'].str.contains(nonmed_pat, na=False), 'is_medical'] = False
+    else:
+        df['is_medical'] = False
 
     df['admission_type'] = df.apply(
         lambda r: classify_admission(r.get('전형명칭', ''), r.get('전형유형', '')), axis=1
